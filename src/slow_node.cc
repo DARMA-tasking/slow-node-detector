@@ -13,9 +13,9 @@ static int N = 128;
 static int K = 128;
 
 std::tuple<std::vector<double>, double> runBenchmark() {
-  Kokkos::View<double**> A(Kokkos::view_alloc(Kokkos::WithoutInitializing, "A"), M, N);
-  Kokkos::View<double**> B(Kokkos::view_alloc(Kokkos::WithoutInitializing, "B"), N, K);
-  Kokkos::View<double**> C(Kokkos::view_alloc(Kokkos::WithoutInitializing, "C"), M, K);
+  Kokkos::View<double**> A("A", M, N);
+  Kokkos::View<double**> B("B", N, K);
+  Kokkos::View<double**> C("C", M, K);
 
   Kokkos::Random_XorShift64_Pool pool(123);
   Kokkos::fill_random(A, pool, 10.0);
