@@ -5,10 +5,11 @@ import matplotlib.pyplot as plt
 
 class SlowRankDetector:
 
-    def __init__(self, output_filepath):
+    def __init__(self, output_filepath, threshold_pct=0.05):
         self.__filepath = output_filepath
         self.__node_times = {}
         self.__node_breakdowns = {}
+        self.__threshold_pct = threshold_pct
 
         # Initialize outliers
         self.__outlying_nodes = {}
@@ -36,7 +37,7 @@ class SlowRankDetector:
                 self.__node_times[node_id] = total_time
                 self.__node_breakdowns[node_id] = breakdown_list
 
-    def __plot_data(self, x_data, y_data, title, xlabel, avg=None, highlights=[]):
+    def __plot_data(self, x_data, y_data, title, xlabel, highlights=[]):
         """
         Plots y_data vs. x_data (and possibly the avg as well).
         Saves plots to the same directory as the input file.
@@ -44,6 +45,9 @@ class SlowRankDetector:
         x_size = len(x_data)
         y_size = len(y_data)
         assert x_size == y_size
+
+        # Calculate average
+        avg = np.mean(y_data)
 
         # Determine x-ticks
         n_ticks = 10
@@ -54,53 +58,30 @@ class SlowRankDetector:
 
         # Generate plot
         plt.figure()
-        plt.plot(x_data, y_data, zorder=2)
-        legend = False
-        if avg is not None:
-            plt.plot(x_data, [avg] * y_size, label="Average", color="tab:green", zorder=1)
-            legend = True
+        plt.plot(x_data, y_data, zorder=2, label="Data")
+        plt.plot(x_data, [avg] * y_size, label="Average", color="tab:green", zorder=1)
+        plt.plot(x_data, [avg * (1 + self.__threshold_pct)] * y_size, label="Threshold", color="tab:purple", zorder=1)
         if len(highlights) > 0:
             indices = []
             for i in range(y_size):
                 if y_data[i] in highlights:
                     indices.append(i)
             plt.scatter(indices, highlights, label="Outlier(s)", color="r", marker="*", zorder=3)
-            legend = True
         plt.title(title)
         plt.xlabel(xlabel)
         plt.xticks(x_ticks)
         plt.ylabel("Time (s)")
-        if legend:
-            plt.legend()
+        plt.legend()
 
         # Save plot
         save_name = title.lower().replace(" ", "_")
         save_path = os.path.join(self.__plots_dir, f"{save_name}.png")
         plt.savefig(save_path)
 
-    def __find_outliers(self, data, multiplier=1.5):
-        """
-        Determine outliers via the IQR method.
-
-        Parameters:
-            data (list or np.array): Input data.
-            multiplier (float): Multiplier for the IQR to define outlier range (default: 1.5).
-
-        Returns:
-            List of outliers.
-        """
-        # Calculate Q1, Q3, and IQR
-        q1 = np.percentile(data, 25)
-        q3 = np.percentile(data, 75)
-        iqr = q3 - q1
-
-        # Define the lower and upper bounds for outliers
-        lower_bound = q1 - multiplier * iqr
-        upper_bound = q3 + multiplier * iqr
-
-        # Identify outliers
-        outliers = [elt for elt in data if elt < lower_bound or elt > upper_bound]
-
+    def __find_outliers(self, data):
+        avg = np.mean(data)
+        threshold = avg * (1.0 + self.__threshold_pct)
+        outliers = [elt for elt in data if elt > threshold]
         return outliers
 
     def __analyze_across_nodes(self):
@@ -109,7 +90,7 @@ class SlowRankDetector:
         avg_time = np.mean(total_times)
         outliers = self.__find_outliers(total_times)
 
-        self.__plot_data(node_ids, total_times, "Across-Node Comparison", "Node ID", avg_time, outliers)
+        self.__plot_data(node_ids, total_times, "Across-Node Comparison", "Node ID", outliers)
 
         for n_id, time in self.__node_times.items():
             if time in outliers:
@@ -127,7 +108,6 @@ class SlowRankDetector:
             self.__plot_data(
                 iters, breakdown,
                 f"Node {node_id} Breakdown", "Iteration",
-                avg_time if std_dev > 1e-5 else None,
                 outliers)
 
             if len(outliers) > 0:
@@ -168,7 +148,7 @@ class SlowRankDetector:
         print("\n----------------------------------------------------------")
         print("Results from Across-Node Analysis")
         print()
-        print(f"    {len(outlying_nodes)} Outlier Nodes (using IQR method): {outlying_nodes}")
+        print(f"    {len(outlying_nodes)} Outlier Nodes (at least {self.__threshold_pct:.0%} slower than the mean): {outlying_nodes}")
         print(f"    Slowest Node: {node_ids[np.argmax(total_times)]} ({np.max(total_times)}s)")
         print(f"    Fastest Node: {node_ids[np.argmin(total_times)]} ({np.min(total_times)}s)")
         print(f"    Avg Time Across All Nodes: {np.mean(total_times)}s")
