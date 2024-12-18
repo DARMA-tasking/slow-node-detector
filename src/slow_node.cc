@@ -87,7 +87,7 @@ int main(int argc, char** argv) {
     for (auto&& time : all_times) {
       std::cout << "gather: " << cur_rank << ": " << time << ": breakdown: ";
       for (int i = cur; i < iters + cur; i++) {
-        std::cout << all_iter_times[cur];
+        std::cout << all_iter_times[cur] << " ";
       }
       std::cout << std::endl;
       cur += iters;
