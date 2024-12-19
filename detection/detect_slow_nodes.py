@@ -1,4 +1,5 @@
 import os
+import re
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
@@ -9,6 +10,7 @@ class SlowRankDetector:
         self.__filepath = output_filepath
         self.__node_times = {}
         self.__node_breakdowns = {}
+        self.__node_to_proc_map = {}
         self.__threshold_pct = threshold_pct
 
         # Initialize outliers
@@ -28,7 +30,14 @@ class SlowRankDetector:
             for line in output:
                 # Parse each line
                 splits = line.split(":")
-                node_id = int(splits[1].strip())
+                raw_node_info = splits[1].strip()
+                node_info = re.findall(
+                    r"(\d+)\s+\(([^)]+)\)",
+                    raw_node_info
+                )[0]
+                node_id = int(node_info[0])
+                proc_name = node_info[1]
+                self.__node_to_proc_map[node_id] = proc_name
                 total_time =  float(splits[2].strip())
                 breakdown = splits[-1].strip()
                 breakdown_list = [float(t) for t in breakdown.split(" ")]
@@ -148,7 +157,13 @@ class SlowRankDetector:
         print("\n----------------------------------------------------------")
         print("Results from Across-Node Analysis")
         print()
-        print(f"    {len(outlying_nodes)} Outlier Nodes (at least {self.__threshold_pct:.0%} slower than the mean): {outlying_nodes}")
+        print(f"    {len(outlying_nodes)} Outlier Node{'s' if len(outlying_nodes) != 1 else ''} (at least {self.__threshold_pct:.0%} slower than the mean): {outlying_nodes}")
+        if len(outlying_nodes) > 0:
+            print()
+            print(f"    Node-to-Processor Mapping for Slow Node{'s' if len(outlying_nodes) != 1 else ''}: ")
+            for node in outlying_nodes:
+                print(f"        {node}: {self.__node_to_proc_map[node]}")
+            print()
         print(f"    Slowest Node: {node_ids[np.argmax(total_times)]} ({np.max(total_times)}s)")
         print(f"    Fastest Node: {node_ids[np.argmin(total_times)]} ({np.min(total_times)}s)")
         print(f"    Avg Time Across All Nodes: {np.mean(total_times)}s")
@@ -158,8 +173,8 @@ class SlowRankDetector:
         print("----------------------------------------------------------")
         print("Results from Intra-Node Analysis")
         print()
-        print(f"    {len(nodes_with_outlying_iterations)} Nodes With Outlying Iterations: {nodes_with_outlying_iterations}")
-        print(f"    Slowest Iteration: {slowest_iteration} on Node {node_with_slowest_iteration} ({slowest_time}s)")
+        print(f"    {len(nodes_with_outlying_iterations)} Node{'s' if len(outlying_nodes) != 1 else ''} With Outlying Iterations: {nodes_with_outlying_iterations}")
+        print(f"    Slowest Iteration: {slowest_iteration} on Node {node_with_slowest_iteration} ({self.__node_to_proc_map[node_with_slowest_iteration]}) - {slowest_time}s")
         print()
 
         print(f"View generated plots in {self.__plots_dir}.\n")
