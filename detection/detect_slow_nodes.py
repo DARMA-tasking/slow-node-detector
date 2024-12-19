@@ -152,15 +152,15 @@ class SlowRankDetector:
                     slowest_iteration = np.argmax(breakdown)
                     node_with_slowest_iteration = n_id
 
-
         # Print results
+        s = 's' if len(outlying_nodes) != 1 else ''
         print("\n----------------------------------------------------------")
         print("Results from Across-Node Analysis")
         print()
-        print(f"    {len(outlying_nodes)} Outlier Node{'s' if len(outlying_nodes) != 1 else ''} (at least {self.__threshold_pct:.0%} slower than the mean): {outlying_nodes}")
+        print(f"    {len(outlying_nodes)} Outlier Node{s} (at least {self.__threshold_pct:.0%} slower than the mean): {outlying_nodes}")
         if len(outlying_nodes) > 0:
             print()
-            print(f"    Node-to-Processor Mapping for Slow Node{'s' if len(outlying_nodes) != 1 else ''}: ")
+            print(f"    Node-to-Processor Mapping for Slow Node{s}: ")
             for node in outlying_nodes:
                 print(f"        {node}: {self.__node_to_proc_map[node]}")
             print()
@@ -173,7 +173,7 @@ class SlowRankDetector:
         print("----------------------------------------------------------")
         print("Results from Intra-Node Analysis")
         print()
-        print(f"    {len(nodes_with_outlying_iterations)} Node{'s' if len(outlying_nodes) != 1 else ''} With Outlying Iterations: {nodes_with_outlying_iterations}")
+        print(f"    {len(nodes_with_outlying_iterations)} Node{s} With Outlying Iterations: {nodes_with_outlying_iterations}")
         print(f"    Slowest Iteration: {slowest_iteration} on Node {node_with_slowest_iteration} ({self.__node_to_proc_map[node_with_slowest_iteration]}) - {slowest_time}s")
         print()
 
