@@ -59,11 +59,18 @@ int main(int argc, char** argv) {
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   MPI_Comm_size(MPI_COMM_WORLD, &num_ranks);
 
+  char processor_name[MPI_MAX_PROCESSOR_NAME];
+  int name_len;
+  MPI_Get_processor_name(processor_name, &name_len);
+
   std::vector<double> all_times;
   all_times.resize(num_ranks);
 
   std::vector<double> all_iter_times;
   all_iter_times.resize(num_ranks * iters);
+
+  std::vector<char> all_processor_names;
+  all_processor_names.resize(num_ranks * MPI_MAX_PROCESSOR_NAME);
 
   if (rank == 0) {
     std::cout << "num_ranks: " << num_ranks << std::endl;
@@ -81,11 +88,19 @@ int main(int argc, char** argv) {
     MPI_COMM_WORLD
   );
 
+  MPI_Gather(
+    &processor_name, MPI_MAX_PROCESSOR_NAME, MPI_CHAR,
+    &all_processor_names[0], MPI_MAX_PROCESSOR_NAME, MPI_CHAR, 0,
+    MPI_COMM_WORLD
+  );
+
   if (rank == 0) {
     int cur_rank = 0;
     int cur = 0;
     for (auto&& time : all_times) {
-      std::cout << "gather: " << cur_rank << ": " << time << ": breakdown: ";
+      std::cout << "gather: " << cur_rank << " ("
+        << std::string(&all_processor_names[cur_rank * MPI_MAX_PROCESSOR_NAME])
+        << "): " << time << ": breakdown: ";
       for (int i = cur; i < iters + cur; i++) {
         std::cout << all_iter_times[cur] << " ";
       }
