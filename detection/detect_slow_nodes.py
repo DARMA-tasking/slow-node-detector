@@ -28,23 +28,30 @@ class SlowRankDetector:
         """Parses text output from slow_node.cc"""
         with open(self.__filepath, "r") as output:
             for line in output:
-                # Parse each line
-                splits = line.split(":")
-                raw_node_info = splits[1].strip()
-                node_info = re.findall(
-                    r"(\d+)\s+\(([^)]+)\)",
-                    raw_node_info
-                )[0]
-                node_id = int(node_info[0])
-                proc_name = node_info[1]
-                self.__node_to_proc_map[node_id] = proc_name
-                total_time =  float(splits[2].strip())
-                breakdown = splits[-1].strip()
-                breakdown_list = [float(t) for t in breakdown.split(" ")]
+                # Parse each line the starts with "gather"
+                if line.startswith("gather"):
+                    splits = line.split(":")
+                    raw_node_info = splits[1].strip()
+                    # If the processor name is included in the output
+                    if "(" in raw_node_info:
+                        node_info = re.findall(
+                            r"(\d+)\s+\(([^)]+)\)",
+                            raw_node_info
+                        )[0]
+                        node_id = int(node_info[0])
+                        proc_name = node_info[1]
+                        self.__node_to_proc_map[node_id] = proc_name
+                    else:
+                        # Just to prevent errors, map node_id to node_id
+                        node_id = int(raw_node_info)
+                        self.__node_to_proc_map[node_id] = node_id
+                    total_time =  float(splits[2].strip())
+                    breakdown = splits[-1].strip()
+                    breakdown_list = [float(t) for t in breakdown.split(" ")]
 
-                # Populate node data dicts
-                self.__node_times[node_id] = total_time
-                self.__node_breakdowns[node_id] = breakdown_list
+                    # Populate node data dicts
+                    self.__node_times[node_id] = total_time
+                    self.__node_breakdowns[node_id] = breakdown_list
 
     def __plot_data(self, x_data, y_data, title, xlabel, highlights=[]):
         """
