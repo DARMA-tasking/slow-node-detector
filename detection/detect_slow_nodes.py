@@ -30,23 +30,25 @@ class SlowRankDetector:
             for line in output:
                 # Parse each line the starts with "gather"
                 if line.startswith("gather"):
+                    # splits: ['gather', node_info, total_time, 'breakdown', [times]]
                     splits = line.split(":")
+
+                    # 1. Determine the Node ID (and processor name, if present)
                     raw_node_info = splits[1].strip()
-                    # If the processor name is included in the output
-                    if "(" in raw_node_info:
-                        node_info = re.findall(
-                            r"(\d+)\s+\(([^)]+)\)",
-                            raw_node_info
-                        )[0]
-                        node_id = int(node_info[0])
-                        proc_name = node_info[1]
-                        self.__node_to_proc_map[node_id] = proc_name
-                    else:
-                        # Just to prevent errors, map node_id to node_id
-                        node_id = int(raw_node_info)
-                        self.__node_to_proc_map[node_id] = node_id
+                    # raw_node_info = 'node_id (proc)'
+                    node_info = re.findall(
+                        r"(\d+)\s+\(([^)]+)\)",
+                        raw_node_info
+                    )[0]
+                    node_id = int(node_info[0])
+                    proc_name = node_info[1]
+                    self.__node_to_proc_map[node_id] = proc_name
+
+                    # 2. Get the total time for the current node
                     total_time =  float(splits[2].strip())
-                    breakdown = splits[-1].strip()
+
+                    # 3. Isolate the times for each iteration on the current node
+                    breakdown = splits[4].strip()
                     breakdown_list = [float(t) for t in breakdown.split(" ")]
 
                     # Populate node data dicts
@@ -55,7 +57,7 @@ class SlowRankDetector:
 
     def __plot_data(self, x_data, y_data, title, xlabel, highlights=[]):
         """
-        Plots y_data vs. x_data (and possibly the avg as well).
+        Plots y_data vs. x_data and highlights outliers.
         Saves plots to the same directory as the input file.
         """
         x_size = len(x_data)
@@ -95,15 +97,20 @@ class SlowRankDetector:
         plt.savefig(save_path)
 
     def __find_outliers(self, data):
+        """
+        Finds data points that are some percentage (given by self.__threshold_pct)
+        higher than the mean of the data.
+        """
         avg = np.mean(data)
         threshold = avg * (1.0 + self.__threshold_pct)
         outliers = [elt for elt in data if elt > threshold]
         return outliers
 
     def __analyze_across_nodes(self):
-        """Compares the total execution time across all nodes."""
+        """
+        Compares the total execution time across all nodes to
+        find any slow (5% slower than the mean) nodes."""
         node_ids, total_times = zip(*self.__node_times.items())
-        avg_time = np.mean(total_times)
         outliers = self.__find_outliers(total_times)
 
         self.__plot_data(node_ids, total_times, "Across-Node Comparison", "Node ID", outliers)
@@ -113,10 +120,11 @@ class SlowRankDetector:
                 self.__outlying_nodes[n_id] = time
 
     def __analyze_within_nodes(self):
+        """
+        Compares the execution of each iteration on a single node to
+        find any slow (5% slower than the mean) iterations.
+        """
         for node_id, breakdown in self.__node_breakdowns.items():
-
-            avg_time = np.mean(breakdown)
-            std_dev = np.std(breakdown)
             outliers = self.__find_outliers(breakdown)
             n_iterations = len(breakdown)
             iters = list(range(n_iterations))
@@ -134,6 +142,14 @@ class SlowRankDetector:
                 self.__outlying_iterations[node_id].append((idx,t))
 
     def detect(self):
+        """
+        Main function of the SlowRankDetector class.
+        Parses the output file from the slow_node executable
+        and identifies any slow nodes or iterations.
+
+        Plots are generated in the same directory as the output
+        file.
+        """
         self.__parse_output()
         self.__analyze_across_nodes()
         self.__analyze_within_nodes()
