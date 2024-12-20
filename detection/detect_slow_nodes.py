@@ -13,16 +13,27 @@ class SlowRankDetector:
         self.__node_to_proc_map = {}
         self.__threshold_pct = threshold_pct
 
+        # Initialize variables
+        self.__n_nodes = 0
+
         # Initialize outliers
         self.__outlying_nodes = {}
         self.__outlying_iterations = {}
 
-        # Initialize plots directory
-        self.__plots_dir = os.path.join(
+        # Initialize directories
+        self.__output_dir = os.path.join(
             os.path.dirname(output_filepath),
+            "output"
+        )
+        self.__plots_dir = os.path.join(
+            self.__output_dir,
             "plots"
         )
         os.makedirs(self.__plots_dir, exist_ok=True)
+
+    def get_n_nodes(self):
+        """Returns the number of nodes found in the data."""
+        return self.__n_nodes
 
     def __parse_output(self):
         """Parses text output from slow_node.cc"""
@@ -54,6 +65,9 @@ class SlowRankDetector:
                     # Populate node data dicts
                     self.__node_times[node_id] = total_time
                     self.__node_breakdowns[node_id] = breakdown_list
+
+        # Set the number of nodes
+        self.__n_nodes = len(self.__node_times)
 
     def __plot_data(self, x_data, y_data, title, xlabel, highlights=[]):
         """
@@ -202,6 +216,19 @@ class SlowRankDetector:
 
         print(f"View generated plots in {self.__plots_dir}.\n")
 
+    def create_hostfile(self):
+        """
+        Outputs a hostfile that contains a list of all nodes, omitting
+        any slow nodes.
+        """
+        good_procs = set([self.__node_to_proc_map[node] for node in self.__node_times.keys() if node not in self.__outlying_nodes.keys()])
+
+        hostfile_path = os.path.join(self.__output_dir, "hostfile.txt")
+        with open(hostfile_path, "w") as hostfile:
+            for proc in good_procs:
+                hostfile.write(proc + "\n")
+
+        print(f"hostfile with {len(good_procs)} processors has been written to {hostfile_path}")
 
 def main():
     parser = argparse.ArgumentParser(description='Slow Node Detector script.')
@@ -212,5 +239,6 @@ def main():
 
     slowRankDetector = SlowRankDetector(filepath)
     slowRankDetector.detect()
+    slowRankDetector.create_hostfile()
 
 main()
