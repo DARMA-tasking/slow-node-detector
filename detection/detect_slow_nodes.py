@@ -18,6 +18,7 @@ class SlowRankDetector:
 
         # Initialize outliers
         self.__outlying_nodes = {}
+        self.__outlying_node_names = []
         self.__outlying_iterations = {}
 
         # Initialize directories
@@ -133,6 +134,9 @@ class SlowRankDetector:
             if time in outliers:
                 self.__outlying_nodes[n_id] = time
 
+        for node in self.__outlying_nodes.keys():
+            self.__outlying_node_names.append(self.__node_to_proc_map[node])
+
     def __analyze_within_nodes(self):
         """
         Compares the execution of each iteration on a single node to
@@ -221,14 +225,17 @@ class SlowRankDetector:
         Outputs a hostfile that contains a list of all nodes, omitting
         any slow nodes.
         """
-        good_procs = set([self.__node_to_proc_map[node] for node in self.__node_times.keys() if node not in self.__outlying_nodes.keys()])
+        good_node_names = set([
+            node_name for node_name in self.__node_to_proc_map.values()
+            if node_name not in self.__outlying_node_names
+        ])
 
         hostfile_path = os.path.join(self.__output_dir, "hostfile.txt")
         with open(hostfile_path, "w") as hostfile:
-            for proc in good_procs:
-                hostfile.write(proc + "\n")
+            for node_name in good_node_names:
+                hostfile.write(node_name + "\n")
 
-        print(f"hostfile with {len(good_procs)} processors has been written to {hostfile_path}")
+        print(f"hostfile with {len(good_node_names)} processors has been written to {hostfile_path}")
 
 def main():
     parser = argparse.ArgumentParser(description='Slow Node Detector script.')
