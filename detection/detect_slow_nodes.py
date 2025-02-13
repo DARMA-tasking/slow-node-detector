@@ -6,35 +6,61 @@ import matplotlib.pyplot as plt
 
 class SlowRankDetector:
 
-    def __init__(self, output_filepath, threshold_pct=0.05):
-        self.__filepath = output_filepath
-        self.__node_times = {}
-        self.__node_breakdowns = {}
-        self.__node_to_proc_map = {}
-        self.__threshold_pct = threshold_pct
+    def __init__(self, datafile, threshold_percentage, sockets_per_node, ranks_per_node):
+        # Create empty dicts for data
+        self.__rank_times = {}
+        self.__rank_breakdowns = {}
+        self.__rank_to_proc_map = {}
 
         # Initialize variables
-        self.__n_nodes = 0
+        self.__n_ranks = 0
+        self.__filepath = datafile
+        self.__threshold_pct = threshold_percentage
+        self.__spn = sockets_per_node
+        self.__rpn = ranks_per_node
+        self.__rps = self.__rpn / self.__spn
 
         # Initialize outliers
-        self.__outlying_nodes = {}
-        self.__outlying_node_names = []
-        self.__outlying_iterations = {}
+        self.__slow_ranks = {}
+        self.__slow_proc_names = []
+        self.__slow_iterations = {}
 
-        # Initialize directories
+        # Initialize (and create) directories
         self.__output_dir = os.path.join(
-            os.path.dirname(output_filepath),
-            "output"
-        )
+            os.path.dirname(datafile),
+            "output")
         self.__plots_dir = os.path.join(
             self.__output_dir,
-            "plots"
-        )
+            "plots")
         os.makedirs(self.__plots_dir, exist_ok=True)
 
-    def get_n_nodes(self):
-        """Returns the number of nodes found in the data."""
-        return self.__n_nodes
+    def __get_n_slow_ranks_on_node(self, node_name):
+        """
+        Returns the number of ranks in self.__slow_ranks that
+        belong to the given node.
+        """
+        return sum(1 for r_id in self.__slow_ranks if self.__rank_to_proc_map[r_id] == node_name)
+
+    def __is_slow_node(self, node_name):
+        """
+        Returns True if all of the ranks on one socket of the node
+        are considered slow.
+
+        For example, if there are two sockets per node, and half of
+        the ranks on a node are "slow," the function will return True.
+        """
+        # Exit early if possible
+        if len(self.__slow_ranks) < self.__rps:
+            return False
+
+        # Determine how many slow ranks are on this node
+        n_slow_ranks = self.__get_n_slow_ranks_on_node(node_name)
+
+        return n_slow_ranks >= self.__rps
+
+    def get_n_ranks(self):
+        """Returns the number of ranks found in the data."""
+        return self.__n_ranks
 
     def __parse_output(self):
         """Parses text output from slow_node.cc"""
@@ -42,33 +68,33 @@ class SlowRankDetector:
             for line in output:
                 # Parse each line the starts with "gather"
                 if line.startswith("gather"):
-                    # splits: ['gather', node_info, total_time, 'breakdown', [times]]
+                    # splits: ['gather', rank_info, total_time, 'breakdown', [times]]
                     splits = line.split(":")
 
-                    # 1. Determine the Node ID (and processor name, if present)
-                    raw_node_info = splits[1].strip()
-                    # raw_node_info = 'node_id (proc)'
-                    node_info = re.findall(
+                    # 1. Determine the Rank ID (and processor name, if present)
+                    raw_rank_info = splits[1].strip()
+                    # raw_rank_info = 'rank_id (proc)'
+                    rank_info = re.findall(
                         r"(\d+)\s+\(([^)]+)\)",
-                        raw_node_info
+                        raw_rank_info
                     )[0]
-                    node_id = int(node_info[0])
-                    proc_name = node_info[1]
-                    self.__node_to_proc_map[node_id] = proc_name
+                    rank_id = int(rank_info[0])
+                    proc_name = rank_info[1]
+                    self.__rank_to_proc_map[rank_id] = proc_name
 
-                    # 2. Get the total time for the current node
+                    # 2. Get the total time for the current rank
                     total_time =  float(splits[2].strip())
 
-                    # 3. Isolate the times for each iteration on the current node
+                    # 3. Isolate the times for each iteration on the current rank
                     breakdown = splits[4].strip()
                     breakdown_list = [float(t) for t in breakdown.split(" ")]
 
-                    # Populate node data dicts
-                    self.__node_times[node_id] = total_time
-                    self.__node_breakdowns[node_id] = breakdown_list
+                    # Populate rank data dicts
+                    self.__rank_times[rank_id] = total_time
+                    self.__rank_breakdowns[rank_id] = breakdown_list
 
-        # Set the number of nodes
-        self.__n_nodes = len(self.__node_times)
+        # Set the number of ranks
+        self.__n_ranks = len(self.__rank_times)
 
     def __plot_data(self, x_data, y_data, title, xlabel, highlights=[]):
         """
@@ -99,7 +125,8 @@ class SlowRankDetector:
             for i in range(y_size):
                 if y_data[i] in highlights:
                     indices.append(i)
-            plt.scatter(indices, highlights, label="Outlier(s)", color="r", marker="*", zorder=3)
+            s = 's' if len(indices) != 1 else ''
+            plt.scatter(indices, highlights, label=f"Outlier{s}", color="r", marker="*", zorder=3)
         plt.title(title)
         plt.xlabel(xlabel)
         plt.xticks(x_ticks)
@@ -111,7 +138,7 @@ class SlowRankDetector:
         save_path = os.path.join(self.__plots_dir, f"{save_name}.png")
         plt.savefig(save_path)
 
-    def __find_outliers(self, data):
+    def __find_slow_outliers(self, data):
         """
         Finds data points that are some percentage (given by self.__threshold_pct)
         higher than the mean of the data.
@@ -121,101 +148,112 @@ class SlowRankDetector:
         outliers = [elt for elt in data if elt > threshold]
         return outliers
 
-    def __analyze_across_nodes(self):
+    def __analyze_across_ranks(self):
         """
-        Compares the total execution time across all nodes to
-        find any slow (5% slower than the mean) nodes."""
-        node_ids, total_times = zip(*self.__node_times.items())
-        outliers = self.__find_outliers(total_times)
+        Compares the total execution time across all ranks to
+        find any slow (self.__threshold_pct slower than the mean) ranks.
+        """
+        rank_ids, total_times = zip(*self.__rank_times.items())
+        outliers = self.__find_slow_outliers(total_times)
 
-        self.__plot_data(node_ids, total_times, "Across-Node Comparison", "Node ID", outliers)
+        self.__plot_data(rank_ids, total_times, "Across-Rank Comparison", "Rank ID", outliers)
 
-        for n_id, time in self.__node_times.items():
+        for r_id, time in self.__rank_times.items():
             if time in outliers:
-                self.__outlying_nodes[n_id] = time
+                self.__slow_ranks[r_id] = time
 
-        for node in self.__outlying_nodes.keys():
-            self.__outlying_node_names.append(self.__node_to_proc_map[node])
+        for r_id in self.__slow_ranks.keys():
+            node_name = self.__rank_to_proc_map[r_id]
+            if self.__is_slow_node(node_name):
+                self.__slow_proc_names.append(node_name)
 
-    def __analyze_within_nodes(self):
+    def __analyze_within_ranks(self):
         """
-        Compares the execution of each iteration on a single node to
-        find any slow (5% slower than the mean) iterations.
+        Compares the execution of each iteration on a single rank to
+        find any slow (self.__threshold_pct slower than the mean) iterations.
         """
-        for node_id, breakdown in self.__node_breakdowns.items():
-            outliers = self.__find_outliers(breakdown)
+        for rank_id, breakdown in self.__rank_breakdowns.items():
+            outliers = self.__find_slow_outliers(breakdown)
             n_iterations = len(breakdown)
             iters = list(range(n_iterations))
 
             self.__plot_data(
                 iters, breakdown,
-                f"Node {node_id} Breakdown", "Iteration",
+                f"Rank {rank_id} Breakdown", "Iteration",
                 outliers)
 
             if len(outliers) > 0:
-                self.__outlying_iterations[node_id] = []
+                self.__slow_iterations[rank_id] = []
 
             for t in outliers:
                 idx = breakdown.index(t)
-                self.__outlying_iterations[node_id].append((idx,t))
+                self.__slow_iterations[rank_id].append((idx,t))
 
     def detect(self):
         """
         Main function of the SlowRankDetector class.
         Parses the output file from the slow_node executable
-        and identifies any slow nodes or iterations.
+        and identifies any slow ranks or iterations.
 
         Plots are generated in the same directory as the output
         file.
         """
         self.__parse_output()
-        self.__analyze_across_nodes()
-        self.__analyze_within_nodes()
+        self.__analyze_across_ranks()
+        self.__analyze_within_ranks()
 
         # Gather results
-        node_ids, total_times = zip(*self.__node_times.items())
-        outlying_nodes = list(self.__outlying_nodes.keys())
-        nodes_with_outlying_iterations = list(self.__outlying_iterations.keys())
+        rank_ids, total_times = zip(*self.__rank_times.items())
+        slow_rank_ids = list(self.__slow_ranks.keys())
+        ranks_with_outlying_iterations = list(self.__slow_iterations.keys())
 
-        node_with_slowest_iteration = -1
+        rank_with_slowest_iteration = -1
         slowest_iteration = -1
         slowest_time = -np.inf
-        if len(nodes_with_outlying_iterations) > 0:
-            for n_id, (iter, t) in self.__outlying_iterations.items():
+        if len(ranks_with_outlying_iterations) > 0:
+            for r_id, (iter, t) in self.__slow_iterations.items():
                 slowest_time = max(slowest_time, t)
                 if t == slowest_time:
                     slowest_iteration = iter
-                    node_with_slowest_iteration = n_id
+                    rank_with_slowest_iteration = r_id
         else:
-            for n_id, breakdown in self.__node_breakdowns.items():
+            for r_id, breakdown in self.__rank_breakdowns.items():
                 slowest_time = max(np.max(breakdown), slowest_time)
                 if slowest_time in breakdown:
                     slowest_iteration = np.argmax(breakdown)
-                    node_with_slowest_iteration = n_id
+                    rank_with_slowest_iteration = r_id
 
         # Print results
-        s = 's' if len(outlying_nodes) != 1 else ''
+        s = "s" if len(slow_rank_ids) != 1 else ""
         print("\n----------------------------------------------------------")
-        print("Results from Across-Node Analysis")
+        print("Results from Across-Rank Analysis")
         print()
-        print(f"    {len(outlying_nodes)} Outlier Node{s} (at least {self.__threshold_pct:.0%} slower than the mean): {outlying_nodes}")
-        if len(outlying_nodes) > 0:
+        print(f"    {len(slow_rank_ids)} Outlier Ranks{s} (at least {self.__threshold_pct:.0%} slower than the mean): {slow_rank_ids}")
+        if len(slow_rank_ids) > 0:
             print()
-            print(f"    Node-to-Processor Mapping for Slow Node{s}: ")
-            for node in outlying_nodes:
-                print(f"        {node}: {self.__node_to_proc_map[node]}")
+            print(f"    Rank-to-Processor Mapping for Slow Rank{s}: ")
+            for rank in slow_rank_ids:
+                print(f"        {rank}: {self.__rank_to_proc_map[rank]}")
             print()
-        print(f"    Slowest Node: {node_ids[np.argmax(total_times)]} ({np.max(total_times)}s)")
-        print(f"    Fastest Node: {node_ids[np.argmin(total_times)]} ({np.min(total_times)}s)")
-        print(f"    Avg Time Across All Nodes: {np.mean(total_times)}s")
-        print(f"    Std Dev Across All Nodes: {np.std(total_times)}")
+        print(f"    Slowest Rank: {rank_ids[np.argmax(total_times)]} ({np.max(total_times)}s)")
+        print(f"    Fastest Rank: {rank_ids[np.argmin(total_times)]} ({np.min(total_times)}s)")
+        print(f"    Avg Time Across All Ranks: {np.mean(total_times)}s")
+        print(f"    Std Dev Across All Ranks: {np.std(total_times)}")
+        print()
+        if len(self.__slow_proc_names) > 0:
+            print(f"    Slow Nodes:")
+            for proc_name in self.__slow_proc_names:
+                print(f"        {proc_name} ({self.__get_n_slow_ranks_on_node(proc_name)} slow ranks)")
+            print(f"    These nodes will be excluded from the hostfile.")
+        else:
+            print(f"    No nodes had more than {self.__rps} slow ranks.")
         print()
 
         print("----------------------------------------------------------")
-        print("Results from Intra-Node Analysis")
+        print("Results from Intra-Rank Analysis")
         print()
-        print(f"    {len(nodes_with_outlying_iterations)} Node{s} With Outlying Iterations: {nodes_with_outlying_iterations}")
-        print(f"    Slowest Iteration: {slowest_iteration} on Node {node_with_slowest_iteration} ({self.__node_to_proc_map[node_with_slowest_iteration]}) - {slowest_time}s")
+        print(f"    {len(ranks_with_outlying_iterations)} Rank{s} With Outlying Iterations: {ranks_with_outlying_iterations}")
+        print(f"    Slowest Iteration: {slowest_iteration} on Rank {rank_with_slowest_iteration} ({self.__rank_to_proc_map[rank_with_slowest_iteration]}) - {slowest_time}s")
         print()
 
         print(f"View generated plots in {self.__plots_dir}.\n")
@@ -225,27 +263,40 @@ class SlowRankDetector:
         Outputs a hostfile that contains a list of all nodes, omitting
         any slow nodes.
         """
-        good_node_names = set([
-            node_name for node_name in self.__node_to_proc_map.values()
-            if node_name not in self.__outlying_node_names
+        good_proc_names = set([
+            proc_name for proc_name in self.__rank_to_proc_map.values()
+            if proc_name not in self.__slow_proc_names
         ])
 
         hostfile_path = os.path.join(self.__output_dir, "hostfile.txt")
         with open(hostfile_path, "w") as hostfile:
-            for node_name in good_node_names:
-                hostfile.write(node_name + "\n")
+            for proc_name in good_proc_names:
+                hostfile.write(proc_name + "\n")
 
-        print(f"hostfile with {len(good_node_names)} processors has been written to {hostfile_path}")
+        s = 's' if len(good_proc_names) != 1 else ''
+        print(f"hostfile with {len(good_proc_names)} processor{s} has been written to {hostfile_path}")
 
 def main():
-    parser = argparse.ArgumentParser(description='Slow Node Detector script.')
+    parser = argparse.ArgumentParser(description='Slow Rank Detector script.')
     parser.add_argument('-f', '--filepath', help='Absolute or relative path to the output file from running slow_node executable', required=True)
+    parser.add_argument('-t', '--threshold', help='Percentage above average time that indicates a "slow" rank', default=0.05)
+    parser.add_argument('-spn', '--spn', help='Number of sockets per node', default=2)
+    parser.add_argument('-rpn', '--rpn', help='Number of ranks per node', default=48)
     args = parser.parse_args()
 
     filepath = args.filepath if os.path.isabs(args.filepath) else os.path.join(os.getcwd(), args.filepath)
+    threshold_pct = args.threshold
+    spn = args.spn
+    rpn = args.rpn
 
-    slowRankDetector = SlowRankDetector(filepath)
+    slowRankDetector = SlowRankDetector(
+        datafile=filepath,
+        threshold_percentage=threshold_pct,
+        sockets_per_node=spn,
+        ranks_per_node=rpn)
+
     slowRankDetector.detect()
     slowRankDetector.create_hostfile()
 
-main()
+if __name__ == "__main__":
+    main()
