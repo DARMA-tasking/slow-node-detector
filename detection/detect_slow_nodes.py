@@ -16,8 +16,8 @@ class SlowRankDetector:
         self.__n_ranks = 0
         self.__filepath = datafile
         self.__threshold_pct = threshold_percentage
-        self.__spn = sockets_per_node
-        self.__rpn = ranks_per_node
+        self.__spn = int(sockets_per_node)
+        self.__rpn = int(ranks_per_node)
         self.__rps = self.__rpn / self.__spn
 
         # Initialize outliers
@@ -164,7 +164,7 @@ class SlowRankDetector:
 
         for r_id in self.__slow_ranks.keys():
             node_name = self.__rank_to_proc_map[r_id]
-            if self.__is_slow_node(node_name):
+            if self.__is_slow_node(node_name) and node_name not in self.__slow_proc_names:
                 self.__slow_proc_names.append(node_name)
 
     def __analyze_within_ranks(self):
