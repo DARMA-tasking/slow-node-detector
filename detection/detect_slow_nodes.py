@@ -15,7 +15,7 @@ class SlowRankDetector:
         # Initialize variables
         self.__n_ranks = 0
         self.__filepath = datafile
-        self.__threshold_pct = threshold_percentage
+        self.__threshold_pct = float(threshold_percentage)
         self.__spn = int(sockets_per_node)
         self.__rpn = int(ranks_per_node)
         self.__rps = self.__rpn / self.__spn
@@ -241,10 +241,9 @@ class SlowRankDetector:
         print(f"    Std Dev Across All Ranks: {np.std(total_times)}")
         print()
         if len(self.__slow_proc_names) > 0:
-            print(f"    Slow Nodes:")
+            print(f"    Slow Nodes (will be excluded from the hostfile):")
             for proc_name in self.__slow_proc_names:
                 print(f"        {proc_name} ({self.__get_n_slow_ranks_on_node(proc_name)} slow ranks)")
-            print(f"    These nodes will be excluded from the hostfile.")
         else:
             print(f"    No nodes had more than {self.__rps} slow ranks.")
         print()
