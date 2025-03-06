@@ -1,6 +1,10 @@
 
-#include <iostream>
 #include <vector>
+#include <string>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <iostream>
 
 #include <mpi.h>
 
@@ -42,6 +46,30 @@ std::tuple<std::vector<double>, double> runBenchmark() {
   return std::make_tuple(iter_timings, total_time);
 }
 
+void runSensors(int rank, std::string proc_name) {
+  std::string filename = "sensors_output/sensors_" + proc_name + "_" + std::to_string(rank) + ".log";
+  std::ofstream log_file(filename);
+  if (!log_file) {
+      std::cerr << "Error: Unable to open " << filename << " for writing.\n";
+      return;
+  }
+
+  // Run `sensors` and capture output
+  FILE* pipe = popen("sensors", "r");
+  if (!pipe) {
+      std::cerr << "Error: Unable to run sensors command\n";
+      return;
+  }
+
+  char buffer[256];
+  while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+      log_file << buffer;
+  }
+
+  pclose(pipe);
+  log_file.close();
+}
+
 int main(int argc, char** argv) {
   if (argc > 1) {
     iters = atoi(argv[1]);
@@ -52,8 +80,6 @@ int main(int argc, char** argv) {
   MPI_Init(&argc, &argv);
   Kokkos::initialize(argc, argv);
 
-  auto const& [iter_timings, total_time] = runBenchmark();
-
   int rank = -1;
   int num_ranks = 0;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -62,6 +88,12 @@ int main(int argc, char** argv) {
   char processor_name[MPI_MAX_PROCESSOR_NAME];
   int name_len;
   MPI_Get_processor_name(processor_name, &name_len);
+
+  if (rank == 0) system("mkdir -p sensors_output");
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  auto const& [iter_timings, total_time] = runBenchmark();
+  runSensors(rank, processor_name);
 
   std::vector<double> all_times;
   all_times.resize(num_ranks);

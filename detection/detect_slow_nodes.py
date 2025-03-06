@@ -28,14 +28,13 @@ class SlowNodeDetector:
         Node: Computing unit in a cluster
     """
 
-    def __init__(self, datafile, num_nodes, threshold_percentage, sockets_per_node, ranks_per_node, plot_rank_breakdowns):
+    def __init__(self, datafile, sensors_dir, num_nodes, threshold_percentage, sockets_per_node, ranks_per_node, plot_rank_breakdowns):
         # Create empty dicts for storing data
         self.__rank_times = {}
         self.__rank_breakdowns = {}
         self.__rank_to_node_map = {}   # Maps each rank to the name of its corresponding node
-        self.__rank_to_core_map = {}   # Maps the rank IDs to core IDs (from sensors output)
-        self.__rank_to_socket_map = {} # Maps the rank IDs to the socket IDs
-        self.__socket_temps = {}
+        self.__node_temps = {}
+        self.__overheated_cores = {}
 
         # Structure of self.__socket_temps:
         # {
@@ -53,13 +52,14 @@ class SlowNodeDetector:
 
         # Initialize variables
         self.__filepath = datafile
+        self.__sensors_dir = sensors_dir
         self.__num_nodes = int(num_nodes) if num_nodes is not None else None
         self.__threshold_pct = float(threshold_percentage)
         self.__spn = int(sockets_per_node)
         self.__rpn = int(ranks_per_node)
         self.__rps = self.__rpn / self.__spn
         self.__avg_socket_temp = 0.0
-        self.__temperature_analysis_available = False
+        self.__temperature_analysis_available = True if self.__sensors_dir is not None else False
         self.__plot_rank_breakdowns = plot_rank_breakdowns
         self.__num_ranks = 0
 
@@ -140,6 +140,10 @@ class SlowNodeDetector:
         plt.savefig(save_path)
         plt.close()
 
+
+    ###########################################################################
+    ## Parsing
+
     def __parse_output(self):
         """Parses text output from slow_node.cc"""
         is_parsing_sensors, is_parsing_mapping, is_looking_for_core = False, False, False
@@ -174,58 +178,54 @@ class SlowNodeDetector:
                     self.__rank_times[rank_id] = total_time
                     self.__rank_breakdowns[rank_id] = breakdown_list
 
-                elif line.startswith("Sensors output"):
-                    self.__temperature_analysis_available = True
-                    is_parsing_sensors = True
-                    is_parsing_mapping = False
-
-                # Note: The following comments use sample `sensors` output from StackExchange:
-                # https://unix.stackexchange.com/questions/740689/why-arent-the-cpu-core-numbers-in-sensors-output-consecutive
-
-                elif is_parsing_sensors and line.startswith("Package id"):
-                    # Package id 0:  +73.0°C  (high = +80.0°C, crit = +100.0°C)
-                    socket_pattern = r"Package id\s+(\d+):\s+\+([\d.]+) C\s+\(high = \+([\d.]+) C"
-                    socket_id, socket_temp, socket_high = self.__match_regex(socket_pattern, line)
-                    current_socket = int(socket_id)
-                    self.__socket_temps[current_socket] = {
-                        "temperature": float(socket_temp),
-                        "high": float(socket_high),
-                        "cores": {}
-                    }
-
-                elif is_parsing_sensors and line.startswith("Core"):
-                    # Core 0:        +46.0°C  (high = +80.0°C, crit = +100.0°C)
-                    core_pattern = r"Core\s+(\d+):\s+\+([\d.]+) C\s+\(high = \+([\d.]+) C"
-                    core_id, core_temp, core_high = self.__match_regex(core_pattern, line)
-                    current_sensor_core = int(core_id)
-                    self.__socket_temps[current_socket]["cores"][current_sensor_core] = {
-                        "temperature": float(core_temp),
-                        "high": float(core_high)
-                    }
-
-                elif line.startswith("Processor to Core ID Mapping"):
-                    is_parsing_sensors = False
-                    is_parsing_mapping = True
-
-                elif is_parsing_mapping and line.startswith("processor"):
-                    rank_pattern = r"processor\s+:\s+(\d+)"
-                    current_rank = int(self.__match_regex(rank_pattern, line)[0])
-                    # Don't save the rank-to-core mapping for hyperthreaded cores
-                    is_looking_for_core = True if current_rank < self.__rpn else False
-
-                elif is_looking_for_core and line.startswith("core id"):
-                    core_pattern = r"core id\s+:\s+(\d+)"
-                    current_core = int(self.__match_regex(core_pattern, line)[0])
-                    self.__rank_to_core_map[current_rank] = current_core
-                    try_socket = int(current_rank // self.__rps)
-                    socket = try_socket if (try_socket in self.__socket_temps and current_core in self.__socket_temps[try_socket]["cores"]) else -1
-                    if socket == -1:
-                        raise RuntimeError(f"Could not determine correct socket ID for rank {current_rank} (core {current_core})")
-                    self.__rank_to_socket_map[current_rank] = socket
-                    is_looking_for_core = False
-
             self.__num_ranks = len(self.__rank_times)
 
+    def __parse_sensors(self):
+        """
+        Iterates through the sensors directory (given with -s on the command line) and identifies the maximum
+        temperature of each rank on that node.
+        """
+        all_sensor_files = [(os.path.join(self.__sensors_dir, log)) for log in os.listdir(self.__sensors_dir)]
+        for sensor_file in all_sensor_files:
+            sensors_pattern = r".*/sensors_(?P<name>.+?)_(?P<id>\d+)\.log"
+            node_name, rank_str = self.__match_regex(sensors_pattern, sensor_file)
+            if node_name not in self.__node_temps:
+                self.__node_temps = {node_name: {}}
+            current_rank = int(rank_str)
+            current_socket = -1
+            with open(sensor_file, 'r') as sensor_data:
+                for line in sensor_data:
+
+                    # Note: The following comments use sample `sensors` output from StackExchange:
+                    # https://unix.stackexchange.com/questions/740689/why-arent-the-cpu-core-numbers-in-sensors-output-consecutive
+
+                    # Package id 0:  +73.0°C  (high = +80.0°C, crit = +100.0°C)
+                    if line.startswith("Package id"):
+                        socket_pattern = r"Package id\s+(\d+):\s+\+([\d.]+)(?:°C| C)\s+\(high = \+([\d.]+)(?:°C| C)"
+                        socket_id, socket_temp, socket_high = self.__match_regex(socket_pattern, line)
+                        current_socket = int(socket_id)
+                        if current_socket not in self.__node_temps[node_name]:
+                            self.__node_temps[node_name] = {
+                                current_socket: {
+                                    "temperature": float(socket_temp),
+                                    "cores": {}
+                                }
+                            }
+
+                    # Core 0:        +46.0°C  (high = +80.0°C, crit = +100.0°C)
+                    elif line.startswith("Core"):
+                        core_pattern = r"Core\s+(\d+):\s+\+([\d.]+)(?:°C| C)\s+\(high = \+([\d.]+)(?:°C| C)"
+                        core_id, core_temp, core_high = self.__match_regex(core_pattern, line)
+                        current_core = int(core_id)
+                        current_temp = float(core_temp)
+                        all_cores_on_this_socket = self.__node_temps[node_name][current_socket]["cores"]
+                        if current_core not in all_cores_on_this_socket:
+                            all_cores_on_this_socket[current_core] = current_temp
+                        else:
+                            all_cores_on_this_socket[current_core] = max(
+                                all_cores_on_this_socket[current_core],
+                                current_temp
+                            )
 
     ###########################################################################
     ## Secondary analytical functions
@@ -332,23 +332,29 @@ class SlowNodeDetector:
         """
         Identifies over-heated sockets and ranks.
         """
-        all_socket_temps = [s["temperature"] for s in self.__socket_temps.values()]
-        socket_outlier_temps, socket_diffs = self.__find_high_outliers(all_socket_temps)
-        for socket_id, socket_data in self.__socket_temps.items():
-            if (socket_temp := socket_data["temperature"]) in socket_outlier_temps:
-                self.__hot_sockets.append(socket_id)
-                self.__hot_sockets_diffs[socket_id] = socket_diffs[socket_outlier_temps.index(socket_temp)]
-            core_temps = [c["temperature"] for c in socket_data["cores"].values()]
-            core_outlier_temps, core_diffs = self.__find_high_outliers(core_temps)
-            for core_id, core_data in socket_data["cores"].items():
-                # This is slightly tricky because our maps go from ranks (unique) to cores (non-unique)
-                # But now we have to go from core to rank, using the socket_id to do so
-                if (core_temp := core_data["temperature"]) in core_outlier_temps:
-                    ranks = [r for r, c in self.__rank_to_core_map.items() if c == core_id]
-                    rank = ranks[socket_id] # This assumes that the ranks are in order, e.g. ranks [1, 25] are cores [1, 1] on sockets [0, 1]
-                    self.__hot_ranks.append(rank)
-                    self.__hot_ranks_diffs[rank] = core_diffs[core_outlier_temps.index(core_temp)]
+        self.__parse_sensors()   # Populates self.__node_temps
+        print(self.__node_temps)
+        all_cores_and_temps = {}
+        for n_id, node_data in self.__node_temps.items():
+            for s_id, socket_data in node_data.items():
+                for core_id, core_temp in socket_data["cores"].items():
+                    all_cores_and_temps[core_id] = {
+                        "node": n_id,
+                        "socket": s_id,
+                        "temperature": core_temp
+                    }
 
+        outliers, diffs = self.__find_high_outliers([core_data["temperature"] for core_data in all_cores_and_temps.values()])
+        i = 0
+        for c, data in all_cores_and_temps.items():
+            if data["temperature"] in outliers:
+                self.__overheated_cores[c] = {
+                    "socket": data["socket"],
+                    "node": data["node"],
+                    "temperature": data["temperature"],
+                    "diff": diffs[i]
+                }
+                i += 1
 
     ###########################################################################
     ## Public functions
@@ -398,20 +404,11 @@ class SlowNodeDetector:
         print(f"    {len(slow_rank_ids)} Outlier Rank{s} (at least {self.__threshold_pct:.0%} slower than the mean): {slow_rank_ids}")
         if len(slow_rank_ids) > 0:
             print()
-            headline = f"    Slowdown % (Relative to Average), Temperature, and Node for Slow Rank{s}:" if \
-                       self.__temperature_analysis_available else \
-                       f"    Slowdown % (Relative to Average) and Node for Slow Rank{s}:"
-            print(headline)
+            print(f"    Slowdown % (Relative to Average) and Node for Slow Rank{s}:")
             for rank in slow_rank_ids:
                 slowdown = self.__slow_rank_slowdowns[rank]
                 node = self.__rank_to_node_map[rank]
-                info = f"        {rank:>{n}}: {slowdown:.2%} ({node})"
-                if self.__temperature_analysis_available:
-                    c_id = self.__rank_to_core_map[rank]
-                    temp = f"{self.__socket_temps[s_id]['cores'][c_id]['temperature']} C"
-                    s_id = self.__rank_to_socket_map[rank]
-                    info = f"        {rank:>{n}}: {slowdown:.2%}, {temp} ({node} - socket {s_id})"
-                print(info)
+                print(f"        {rank:>{n}}: {slowdown:.2%} ({node})")
             print()
         print(f"    Slowest Rank: {rank_ids[np.argmax(total_times)]} ({np.max(total_times)}s)")
         print(f"    Fastest Rank: {rank_ids[np.argmin(total_times)]} ({np.min(total_times)}s)")
@@ -431,17 +428,15 @@ class SlowNodeDetector:
             print("----------------------------------------------------------")
             print("Results from Temperature Analysis")
             print()
-            s = self.__get_s(self.__hot_sockets)
-            print(f"    {len(self.__hot_sockets)} Socket{s} at least {self.__threshold_pct:.0%} hotter than the mean ({self.__avg_socket_temp} ºC)")
-            for s_id in self.__hot_sockets:
-                print(f"        {s_id}: {self.__socket_temps[s_id]['temperature']} C (+{self.__hot_sockets_diffs[s_id]:.0%})")
-            print()
-            s = self.__get_s(self.__hot_ranks)
-            print(f"    {len(self.__hot_ranks)} Rank{s} at least {self.__threshold_pct:.0%} hotter than the mean.")
-            for r_id in self.__hot_ranks:
-                c_id = self.__rank_to_core_map[r_id]
-                s_id = self.__rank_to_socket_map[r_id]
-                print(f"        {r_id:>{n}} (socket {s_id}): {self.__socket_temps[s_id]['cores'][c_id]['temperature']} C (+{self.__hot_ranks_diffs[r_id]:.0%})")
+            s = self.__get_s(self.__overheated_cores)
+            n_overheated_cores = len(self.__overheated_cores)
+            print(f"    Found {n_overheated_cores} over-heated cores:")
+            for c_id, c_data in self.__overheated_cores.items():
+                s_id = c_data["socket"]
+                node = c_data["node"]
+                diff = c_data["diff"]
+                temp = c_data["temperature"]
+                print(f"        Core {c_id}: {temp} C ({diff:.0%} hotter than mean) - {node} (socket {s_id})")
             print()
 
         s = self.__get_s(ranks_with_outlying_iterations)
@@ -452,7 +447,8 @@ class SlowNodeDetector:
         print(f"    Slowest Iteration: {slowest_iteration} on Rank {rank_with_slowest_iteration} ({self.__rank_to_node_map[rank_with_slowest_iteration]}) - {slowest_time}s")
         print()
 
-        print(f"View generated plots in {self.__plots_dir}.\n")
+        print(f"View generated plots in {self.__plots_dir}.")
+        print()
 
     def create_hostfile(self):
         """
@@ -487,15 +483,17 @@ class SlowNodeDetector:
             for node_name in good_node_names:
                 hostfile.write(node_name + "\n")
 
-        s = 's' if len(good_node_names) != 1 else ''
-        print()
+        s = self.__get_s(good_node_names)
         print(f"hostfile with {len(good_node_names)} node{s} has been written to {hostfile_path}")
         print("----------------------------------------------------------")
 
+def getFilepath(path: str):
+    return path if os.path.isabs(path) else os.path.join(os.getcwd(), path)
 
 def main():
     parser = argparse.ArgumentParser(description='Slow Rank Detector script.')
     parser.add_argument('-f', '--filepath', help='Absolute or relative path to the output file from running slow_node executable', required=True)
+    parser.add_argument('-s', '--sensors', help='Absolute or relative path to the directory containing all sensor logs', default=None)
     parser.add_argument('-N', '--num_nodes', help='The number of nodes required by the application', default=None)
     parser.add_argument('-t', '--threshold', help='Percentage above average time that indicates a "slow" rank', default=0.05)
     parser.add_argument('-spn', '--spn', help='Number of sockets per node', default=2)
@@ -503,10 +501,12 @@ def main():
     parser.add_argument('-p', '--plot_all_ranks', action='store_true', help='Plot the breakdowns for every rank')
     args = parser.parse_args()
 
-    filepath = args.filepath if os.path.isabs(args.filepath) else os.path.join(os.getcwd(), args.filepath)
+    filepath = getFilepath(args.filepath)
+    sensors_dir = getFilepath(args.sensors) if args.sensors is not None else None
 
     slowNodeDetector = SlowNodeDetector(
         datafile=filepath,
+        sensors_dir=sensors_dir,
         num_nodes=args.num_nodes,
         threshold_percentage=args.threshold,
         sockets_per_node=args.spn,
