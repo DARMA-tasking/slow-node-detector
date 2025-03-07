@@ -15,10 +15,13 @@ class SlowNodeDetector:
         detect(): This will print out information regarding slow and/or over-heated
             ranks, along with the sockets and nodes they reside on.
 
-        create_hostfile(): This will generate a `hostfile.txt` with all "good" nodes.
+        createHostfile(): This will generate a `hostfile.txt` with all "good" nodes.
             This file can be used in future jobs to ensure that slow nodes are
             avoided. Importantly, nodes are only omitted from the hostfile if
             the number of slow ranks on that node surpasses the size of a socket.
+
+            Optional: Use `-N` argument to specify the number of nodes that should be
+            included in the hostfile.
 
     The following terminology will be used through the SlowNodeDetector:
 
@@ -28,16 +31,16 @@ class SlowNodeDetector:
         Node: Computing unit in a cluster
     """
 
-    def __init__(self, datafile, sensors_dir, num_nodes, threshold_percentage, sockets_per_node, ranks_per_node, plot_rank_breakdowns):
+    def __init__(self, data_file, sensors_dir, num_nodes, threshold_percentage, sockets_per_node, ranks_per_node, plot_rank_breakdowns):
         # Create empty dicts for storing data
         self.__rank_times = {}
         self.__rank_breakdowns = {}
-        self.__rank_to_node_map = {}   # Maps each rank to the name of its corresponding node
+        self.__rank_to_node_map = {} # Maps each rank to the name of its corresponding node
         self.__node_temps = {}
         self.__overheated_nodes = {}
 
         # Initialize variables
-        self.__filepath = datafile
+        self.__filepath = data_file
         self.__sensors_dir = sensors_dir
         self.__num_nodes = int(num_nodes) if num_nodes is not None else None
         self.__threshold_pct = float(threshold_percentage)
@@ -61,7 +64,7 @@ class SlowNodeDetector:
 
         # Initialize (and create) directories
         self.__output_dir = os.path.join(
-            os.path.dirname(datafile),
+            os.path.dirname(data_file),
             "output")
         self.__plots_dir = os.path.join(
             self.__output_dir,
@@ -72,18 +75,18 @@ class SlowNodeDetector:
     ###########################################################################
     ## Utilities
 
-    def __get_s(self, lst: list):
+    def __s(self, lst: list):
         """Helper function for the print statements."""
         return "s" if len(lst) != 1 else ""
 
-    def __match_regex(self, pattern: str, line: str):
+    def __matchRegex(self, pattern: str, line: str):
         """Helper function for matching regex expressions."""
         match = re.search(pattern, line)
         if match:
             return tuple(match.groups())
         raise RuntimeError(f"regex matching failed on line {line}")
 
-    def __plot_data(self, x_data, y_data, title, xlabel, highlights=[]):
+    def __plotData(self, x_data, y_data, title, xlabel, highlights=[]):
         """
         Plots y_data vs. x_data and highlights outliers.
         Saves plots to the same directory as the input file.
@@ -130,7 +133,7 @@ class SlowNodeDetector:
     ###########################################################################
     ## Parsing
 
-    def __parse_output(self):
+    def __parseOutput(self):
         """Parses text output from slow_node.cc"""
         is_parsing_sensors, is_parsing_mapping, is_looking_for_core = False, False, False
         current_socket, current_sensor_core = -1, -1
@@ -166,7 +169,7 @@ class SlowNodeDetector:
 
             self.__num_ranks = len(self.__rank_times)
 
-    def __parse_sensors(self):
+    def __parseSensors(self):
         """
         Iterates through the sensors directory (given with -s on the command line) and identifies the maximum
         temperature of each rank on that node.
@@ -174,7 +177,7 @@ class SlowNodeDetector:
         all_sensor_files = [(os.path.join(self.__sensors_dir, log)) for log in os.listdir(self.__sensors_dir)]
         for sensor_file in all_sensor_files:
             sensors_pattern = r".*/sensors_(?P<name>.+?)_(?P<id>\d+)\.log"
-            node_name, rank_str = self.__match_regex(sensors_pattern, sensor_file)
+            node_name, rank_str = self.__matchRegex(sensors_pattern, sensor_file)
             if node_name not in self.__node_temps:
                 self.__node_temps = {node_name: {}}
             current_rank = int(rank_str)
@@ -188,7 +191,7 @@ class SlowNodeDetector:
                     # Package id 0:  +73.0°C  (high = +80.0°C, crit = +100.0°C)
                     if line.startswith("Package id"):
                         socket_pattern = r"Package id\s+(\d+):\s+\+([\d.]+)(?:°C| C)\s+\(high = \+([\d.]+)(?:°C| C)"
-                        socket_id, socket_temp, socket_high = self.__match_regex(socket_pattern, line)
+                        socket_id, socket_temp, socket_high = self.__matchRegex(socket_pattern, line)
                         current_socket = int(socket_id)
                         if current_socket not in self.__node_temps[node_name]:
                             self.__node_temps[node_name] = {
@@ -201,7 +204,7 @@ class SlowNodeDetector:
                     # Core 0:        +46.0°C  (high = +80.0°C, crit = +100.0°C)
                     elif line.startswith("Core"):
                         core_pattern = r"Core\s+(\d+):\s+\+([\d.]+)(?:°C| C)\s+\(high = \+([\d.]+)(?:°C| C)"
-                        core_id, core_temp, core_high = self.__match_regex(core_pattern, line)
+                        core_id, core_temp, core_high = self.__matchRegex(core_pattern, line)
                         current_core = int(core_id)
                         current_temp = float(core_temp)
                         all_cores_on_this_socket = self.__node_temps[node_name][current_socket]["cores"]
@@ -216,14 +219,14 @@ class SlowNodeDetector:
     ###########################################################################
     ## Secondary analytical functions
 
-    def __get_n_slow_ranks_on_node(self, node_name):
+    def __getNumberOfSlowRanksOnNode(self, node_name):
         """
         Returns the number of ranks in self.__slow_ranks that
         belong to the given node.
         """
         return sum(1 for r_id in self.__slow_ranks if self.__rank_to_node_map[r_id] == node_name)
 
-    def __is_slow_node(self, node_name):
+    def __isSlowNode(self, node_name):
         """
         Returns True if all of the ranks on one socket of the node
         are considered slow.
@@ -236,11 +239,11 @@ class SlowNodeDetector:
             return False
 
         # Determine how many slow ranks are on this node
-        n_slow_ranks = self.__get_n_slow_ranks_on_node(node_name)
+        n_slow_ranks = self.__getNumberOfSlowRanksOnNode(node_name)
 
         return n_slow_ranks >= self.__rps
 
-    def __sort_nodes_by_execution_time(self, nodes: list):
+    def __sortNodesByExecutionTime(self, nodes: list):
         """
         Takes in a list of node names and sorts them based on total execution time.
         The fastest nodes will be first, and the slowest will be last.
@@ -252,10 +255,10 @@ class SlowNodeDetector:
                     node_times[n] = 0.0
                 node_times[n] += self.__rank_times[r]
         # Alternative:
-        # return sorted(nodes, key=lambda n: self.__get_n_slow_ranks_on_node(n))
+        # return sorted(nodes, key=lambda n: self.__getNumberOfSlowRanksOnNode(n))
         return sorted(node_times, key=lambda t: node_times[t])
 
-    def __find_high_outliers(self, data):
+    def __findHighOutliers(self, data):
         """
         Finds data points that are some percentage (given by self.__threshold_pct)
         higher than the mean of the data.
@@ -271,15 +274,15 @@ class SlowNodeDetector:
     ###########################################################################
     ## Primary analytical functions
 
-    def __analyze_across_ranks(self):
+    def __analyzeAcrossRanks(self):
         """
         Compares the total execution time across all ranks to
         find any slow (self.__threshold_pct slower than the mean) ranks.
         """
         rank_ids, total_times = zip(*self.__rank_times.items())
-        outliers, slowdowns = self.__find_high_outliers(total_times)
+        outliers, slowdowns = self.__findHighOutliers(total_times)
 
-        self.__plot_data(rank_ids, total_times, "Across-Rank Comparison", "Rank ID", outliers)
+        self.__plotData(rank_ids, total_times, "Across-Rank Comparison", "Rank ID", outliers)
 
         for r_id, time in self.__rank_times.items():
             if time in outliers:
@@ -288,21 +291,21 @@ class SlowNodeDetector:
 
         for r_id in self.__slow_ranks.keys():
             node_name = self.__rank_to_node_map[r_id]
-            if self.__is_slow_node(node_name) and node_name not in self.__slow_node_names:
+            if self.__isSlowNode(node_name) and node_name not in self.__slow_node_names:
                 self.__slow_node_names.append(node_name)
 
-    def __analyze_within_ranks(self):
+    def __analyzeWithinRanks(self):
         """
         Compares the execution of each iteration on a single rank to
         find any slow (self.__threshold_pct slower than the mean) iterations.
         """
         for rank_id, breakdown in self.__rank_breakdowns.items():
-            outliers, _ = self.__find_high_outliers(breakdown)
+            outliers, _ = self.__findHighOutliers(breakdown)
             n_iterations = len(breakdown)
             iters = list(range(n_iterations))
 
             if self.__plot_rank_breakdowns:
-                self.__plot_data(
+                self.__plotData(
                     iters, breakdown,
                     f"Rank {rank_id} Breakdown", "Iteration",
                     outliers)
@@ -314,15 +317,15 @@ class SlowNodeDetector:
                 idx = breakdown.index(t)
                 self.__slow_iterations[rank_id].append((idx,t))
 
-    def __analyze_temperatures(self):
+    def __analyzeTemperatures(self):
         """
         Identifies over-heated sockets and ranks.
         """
-        self.__parse_sensors()
+        self.__parseSensors()
         all_cores_and_temps = {}
         for n_id, node_data in self.__node_temps.items():
             for s_id, socket_data in node_data.items():
-                outliers, diffs = self.__find_high_outliers(list(socket_data["cores"].values()))
+                outliers, diffs = self.__findHighOutliers(list(socket_data["cores"].values()))
                 i = 0
                 for c_id, core_temp in socket_data["cores"].items():
                     if core_temp in outliers:
@@ -349,11 +352,11 @@ class SlowNodeDetector:
         Plots are generated in the same directory as the output
         file.
         """
-        self.__parse_output()
-        self.__analyze_across_ranks()
-        self.__analyze_within_ranks()
+        self.__parseOutput()
+        self.__analyzeAcrossRanks()
+        self.__analyzeWithinRanks()
         if self.__temperature_analysis_available:
-            self.__analyze_temperatures()
+            self.__analyzeTemperatures()
 
         # Gather results
         rank_ids, total_times = zip(*self.__rank_times.items())
@@ -377,7 +380,7 @@ class SlowNodeDetector:
                     rank_with_slowest_iteration = r_id
 
         # Print results
-        s = self.__get_s(slow_rank_ids)
+        s = self.__s(slow_rank_ids)
         n = len(str(abs(int(self.__num_ranks))))
         print("\n----------------------------------------------------------")
         print("Across-Rank Analysis")
@@ -397,10 +400,10 @@ class SlowNodeDetector:
         print(f"    Std Dev Across All Ranks: {np.std(total_times)} s")
         print()
         if len(self.__slow_node_names) > 0:
-            s = self.__get_s(self.__slow_node_names)
+            s = self.__s(self.__slow_node_names)
             print(f"    {len(self.__slow_node_names)} node{s} will be excluded from the hostfile:")
             for node_name in self.__slow_node_names:
-                print(f"        {node_name} ({self.__get_n_slow_ranks_on_node(node_name)} slow ranks)")
+                print(f"        {node_name} ({self.__getNumberOfSlowRanksOnNode(node_name)} slow ranks)")
         else:
             print(f"    No nodes had more than {int(self.__rps)} slow ranks.")
         print()
@@ -415,13 +418,13 @@ class SlowNodeDetector:
                         diff = c_data["diff"]
                         temp = c_data["temperature"]
                         core_temp_outputs.append(f"        Core {c_id}: {temp} C ({diff:.0%} hotter than mean) - {n_id} (socket {s_id})")
-            s = self.__get_s(core_temp_outputs)
+            s = self.__s(core_temp_outputs)
             print(f"    Found {len(core_temp_outputs)} over-heated cores:")
             for core_temp_output in core_temp_outputs:
                 print(core_temp_output)
             print()
 
-        s = self.__get_s(ranks_with_outlying_iterations)
+        s = self.__s(ranks_with_outlying_iterations)
         print("Intra-Rank Analysis")
         print()
         print(f"    {len(ranks_with_outlying_iterations)} Rank{s} With Outlying Iterations: {ranks_with_outlying_iterations}")
@@ -432,33 +435,44 @@ class SlowNodeDetector:
         print("----------------------------------------------------------")
         print()
 
-    def create_hostfile(self):
+    def createHostfile(self):
         """
         Outputs a hostfile that contains a list of all nodes, omitting
         any slow nodes.
+
+        If the -N argument was passed, exactly N nodes will be written
+        in the hostfile, assuming that there are least N "good" nodes.
+
+        If there were more than N "good" nodes, then we sort the nodes
+        by total execution time and only include the N fastest.
+
+        If there are fewer than N "good" nodes, then we write that all
+        "good" nodes to the file and output a warning that not enough
+        nodes were found. If this hostfile is used in a run with the
+        full N number of nodes specified, mpiexec will throw an error.
         """
         good_node_names = set([
             node_name for node_name in self.__rank_to_node_map.values()
             if node_name not in self.__slow_node_names
         ])
 
-        # If num_nodes was provided, only add that many to the hostfile
+        # If num_nodes was provided, only add that many nodes to the hostfile
         if self.__num_nodes is not None:
             num_good_nodes = len(good_node_names)
-            s = self.__get_s(good_node_names)
+            s = self.__s(good_node_names)
             if num_good_nodes < self.__num_nodes:
                 print(f"WARNING: SlowNodeDetector will only include {num_good_nodes} node{s} "
                       f"in the hostfile, but the user requested {self.__num_nodes}.")
             elif num_good_nodes > self.__num_nodes:
                 n_nodes_to_drop = num_good_nodes - self.__num_nodes
                 assert n_nodes_to_drop > 0, f"Cannot drop {n_nodes_to_drop}"
-                sorted_nodes = self.__sort_nodes_by_execution_time(good_node_names)
+                sorted_nodes = self.__sortNodesByExecutionTime(good_node_names)
                 print(
                     f"Since the SlowNodeDetector originally found {num_good_nodes} good node{s}, "
                     f"but only {self.__num_nodes} are needed, the following nodes will also be "
                     f"omitted from the hostfile:")
                 for node in sorted_nodes[-n_nodes_to_drop:]:
-                    print(f"    {node} ({self.__get_n_slow_ranks_on_node(node)} slow ranks)")
+                    print(f"    {node} ({self.__getNumberOfSlowRanksOnNode(node)} slow ranks)")
                 good_node_names = sorted_nodes[:-n_nodes_to_drop]
 
         hostfile_path = os.path.join(self.__output_dir, "hostfile.txt")
@@ -466,13 +480,17 @@ class SlowNodeDetector:
             for node_name in good_node_names:
                 hostfile.write(node_name + "\n")
 
-        s = self.__get_s(good_node_names)
+        s = self.__s(good_node_names)
         print(f"hostfile with {len(good_node_names)} node{s} has been written to {hostfile_path}\n")
 
 def getFilepath(path: str):
     return path if os.path.isabs(path) else os.path.join(os.getcwd(), path)
 
 def main():
+    """
+    See documentation of SlowNodeDetector class, as well as
+    the detect() and createHostfile() methods, for more information.
+    """
     parser = argparse.ArgumentParser(description='Slow Rank Detector script.')
     parser.add_argument('-f', '--filepath', help='Absolute or relative path to the output file from running slow_node executable', required=True)
     parser.add_argument('-s', '--sensors', help='Absolute or relative path to the directory containing all sensor logs', default=None)
@@ -487,7 +505,7 @@ def main():
     sensors_dir = getFilepath(args.sensors) if args.sensors is not None else None
 
     slowNodeDetector = SlowNodeDetector(
-        datafile=filepath,
+        data_file=filepath,
         sensors_dir=sensors_dir,
         num_nodes=args.num_nodes,
         threshold_percentage=args.threshold,
@@ -496,7 +514,7 @@ def main():
         plot_rank_breakdowns=args.plot_all_ranks)
 
     slowNodeDetector.detect()
-    slowNodeDetector.create_hostfile()
+    slowNodeDetector.createHostfile()
 
 if __name__ == "__main__":
     main()
