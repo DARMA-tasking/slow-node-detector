@@ -332,8 +332,7 @@ class SlowNodeDetector:
         """
         Identifies over-heated sockets and ranks.
         """
-        self.__parse_sensors()   # Populates self.__node_temps
-        print(self.__node_temps)
+        self.__parse_sensors()
         all_cores_and_temps = {}
         for n_id, node_data in self.__node_temps.items():
             for s_id, socket_data in node_data.items():
@@ -343,7 +342,6 @@ class SlowNodeDetector:
                         "socket": s_id,
                         "temperature": core_temp
                     }
-
         outliers, diffs = self.__find_high_outliers([core_data["temperature"] for core_data in all_cores_and_temps.values()])
         i = 0
         for c, data in all_cores_and_temps.items():
@@ -399,7 +397,7 @@ class SlowNodeDetector:
         s = self.__get_s(slow_rank_ids)
         n = len(str(abs(int(self.__num_ranks))))
         print("\n----------------------------------------------------------")
-        print("Results from Across-Rank Analysis")
+        print("Across-Rank Analysis")
         print()
         print(f"    {len(slow_rank_ids)} Outlier Rank{s} (at least {self.__threshold_pct:.0%} slower than the mean): {slow_rank_ids}")
         if len(slow_rank_ids) > 0:
@@ -425,8 +423,7 @@ class SlowNodeDetector:
         print()
 
         if self.__temperature_analysis_available:
-            print("----------------------------------------------------------")
-            print("Results from Temperature Analysis")
+            print("Temperature Analysis")
             print()
             s = self.__get_s(self.__overheated_cores)
             n_overheated_cores = len(self.__overheated_cores)
@@ -440,14 +437,14 @@ class SlowNodeDetector:
             print()
 
         s = self.__get_s(ranks_with_outlying_iterations)
-        print("----------------------------------------------------------")
-        print("Results from Intra-Rank Analysis")
+        print("Intra-Rank Analysis")
         print()
         print(f"    {len(ranks_with_outlying_iterations)} Rank{s} With Outlying Iterations: {ranks_with_outlying_iterations}")
         print(f"    Slowest Iteration: {slowest_iteration} on Rank {rank_with_slowest_iteration} ({self.__rank_to_node_map[rank_with_slowest_iteration]}) - {slowest_time}s")
         print()
 
         print(f"View generated plots in {self.__plots_dir}.")
+        print("----------------------------------------------------------")
         print()
 
     def create_hostfile(self):
@@ -484,8 +481,7 @@ class SlowNodeDetector:
                 hostfile.write(node_name + "\n")
 
         s = self.__get_s(good_node_names)
-        print(f"hostfile with {len(good_node_names)} node{s} has been written to {hostfile_path}")
-        print("----------------------------------------------------------")
+        print(f"hostfile with {len(good_node_names)} node{s} has been written to {hostfile_path}\n")
 
 def getFilepath(path: str):
     return path if os.path.isabs(path) else os.path.join(os.getcwd(), path)
@@ -515,8 +511,6 @@ def main():
 
     slowNodeDetector.detect()
     slowNodeDetector.create_hostfile()
-
-    print("Done.")
 
 if __name__ == "__main__":
     main()

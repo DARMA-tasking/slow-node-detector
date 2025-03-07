@@ -1,10 +1,8 @@
 
 #include <vector>
-#include <string>
-#include <cstdio>
-#include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <filesystem>
 
 #include <mpi.h>
 
@@ -46,26 +44,27 @@ std::tuple<std::vector<double>, double> runBenchmark() {
   return std::make_tuple(iter_timings, total_time);
 }
 
-void runSensors(int rank, std::string proc_name) {
-  std::string filename = "sensors_output/sensors_" + proc_name + "_" + std::to_string(rank) + ".log";
+void runSensors(int rank, const std::string& proc_name) {
+  // Set up log files
+  std::filesystem::path output_dir = "sensors_output";
+  std::filesystem::path filename = output_dir / ("sensors_" + proc_name + "_" + std::to_string(rank) + ".log");
+  std::filesystem::create_directories(output_dir);
   std::ofstream log_file(filename);
   if (!log_file) {
       std::cerr << "Error: Unable to open " << filename << " for writing.\n";
       return;
   }
 
-  // Run `sensors` and capture output
+  // Get output from `sensors`
   FILE* pipe = popen("sensors", "r");
   if (!pipe) {
       std::cerr << "Error: Unable to run sensors command\n";
       return;
   }
-
   char buffer[256];
   while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
       log_file << buffer;
   }
-
   pclose(pipe);
   log_file.close();
 }
