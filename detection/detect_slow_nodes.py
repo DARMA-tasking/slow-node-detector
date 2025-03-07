@@ -34,21 +34,7 @@ class SlowNodeDetector:
         self.__rank_breakdowns = {}
         self.__rank_to_node_map = {}   # Maps each rank to the name of its corresponding node
         self.__node_temps = {}
-        self.__overheated_cores = {}
-
-        # Structure of self.__socket_temps:
-        # {
-        #     socket_id: {
-        #         "temperature": float,
-        #         "high": float,
-        #         "cores": {
-        #             core_id: {
-        #                 "temperature": float
-        #                 "high": float
-        #             }
-        #         }
-        #     }
-        # }
+        self.__overheated_nodes = {}
 
         # Initialize variables
         self.__filepath = datafile
@@ -336,23 +322,20 @@ class SlowNodeDetector:
         all_cores_and_temps = {}
         for n_id, node_data in self.__node_temps.items():
             for s_id, socket_data in node_data.items():
-                for core_id, core_temp in socket_data["cores"].items():
-                    all_cores_and_temps[core_id] = {
-                        "node": n_id,
-                        "socket": s_id,
-                        "temperature": core_temp
-                    }
-        outliers, diffs = self.__find_high_outliers([core_data["temperature"] for core_data in all_cores_and_temps.values()])
-        i = 0
-        for c, data in all_cores_and_temps.items():
-            if data["temperature"] in outliers:
-                self.__overheated_cores[c] = {
-                    "socket": data["socket"],
-                    "node": data["node"],
-                    "temperature": data["temperature"],
-                    "diff": diffs[i]
-                }
-                i += 1
+                outliers, diffs = self.__find_high_outliers(list(socket_data["cores"].values()))
+                i = 0
+                for c_id, core_temp in socket_data["cores"].items():
+                    if core_temp in outliers:
+                        if n_id not in self.__overheated_nodes:
+                            self.__overheated_nodes[n_id] = {}
+                        if s_id not in self.__overheated_nodes[n_id]:
+                            self.__overheated_nodes[n_id][s_id] = {}
+                        self.__overheated_nodes[n_id][s_id][c_id] = {
+                            "temperature": core_temp,
+                            "diff": diffs[i]
+                        }
+                        i += 1
+
 
     ###########################################################################
     ## Public functions
@@ -425,15 +408,17 @@ class SlowNodeDetector:
         if self.__temperature_analysis_available:
             print("Temperature Analysis")
             print()
-            s = self.__get_s(self.__overheated_cores)
-            n_overheated_cores = len(self.__overheated_cores)
-            print(f"    Found {n_overheated_cores} over-heated cores:")
-            for c_id, c_data in self.__overheated_cores.items():
-                s_id = c_data["socket"]
-                node = c_data["node"]
-                diff = c_data["diff"]
-                temp = c_data["temperature"]
-                print(f"        Core {c_id}: {temp} C ({diff:.0%} hotter than mean) - {node} (socket {s_id})")
+            core_temp_outputs = []
+            for n_id, n_data in self.__overheated_nodes.items():
+                for s_id, s_data in n_data.items():
+                    for c_id, c_data in s_data.items():
+                        diff = c_data["diff"]
+                        temp = c_data["temperature"]
+                        core_temp_outputs.append(f"        Core {c_id}: {temp} C ({diff:.0%} hotter than mean) - {n_id} (socket {s_id})")
+            s = self.__get_s(core_temp_outputs)
+            print(f"    Found {len(core_temp_outputs)} over-heated cores:")
+            for core_temp_output in core_temp_outputs:
+                print(core_temp_output)
             print()
 
         s = self.__get_s(ranks_with_outlying_iterations)
@@ -460,15 +445,16 @@ class SlowNodeDetector:
         # If num_nodes was provided, only add that many to the hostfile
         if self.__num_nodes is not None:
             num_good_nodes = len(good_node_names)
+            s = self.__get_s(good_node_names)
             if num_good_nodes < self.__num_nodes:
-                print(f"WARNING: SlowNodeDetector will only include {num_good_nodes} nodes "
+                print(f"WARNING: SlowNodeDetector will only include {num_good_nodes} node{s} "
                       f"in the hostfile, but the user requested {self.__num_nodes}.")
             elif num_good_nodes > self.__num_nodes:
                 n_nodes_to_drop = num_good_nodes - self.__num_nodes
                 assert n_nodes_to_drop > 0, f"Cannot drop {n_nodes_to_drop}"
                 sorted_nodes = self.__sort_nodes_by_execution_time(good_node_names)
                 print(
-                    f"Since the SlowNodeDetector originally found {num_good_nodes} good nodes, "
+                    f"Since the SlowNodeDetector originally found {num_good_nodes} good node{s}, "
                     f"but only {self.__num_nodes} are needed, the following nodes will also be "
                     f"omitted from the hostfile:")
                 for node in sorted_nodes[-n_nodes_to_drop:]:
