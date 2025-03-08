@@ -3,6 +3,8 @@ import re
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
 
 class SlowNodeDetector:
     """
@@ -82,6 +84,13 @@ class SlowNodeDetector:
             return tuple(match.groups())
         raise RuntimeError(f"regex matching failed on line {line}")
 
+    def __freedmanDiaconisBins(self, data):
+        q25, q75 = np.percentile(data, [25, 75])
+        iqr = q75 - q25
+        bin_width = 1 * iqr * len(data) ** (-1/3)
+        bins = int((data.max() - data.min()) / bin_width)
+        return bins
+
     def __plotData(self, x_data, y_data, title, xlabel, highlights=[]):
         """
         Plots y_data vs. x_data and highlights outliers.
@@ -125,6 +134,42 @@ class SlowNodeDetector:
         plt.savefig(save_path)
         plt.close()
 
+    def __plotRankTimes(self, df: pd.DataFrame):
+        plt.figure(figsize=(16,9))
+        scatter = sns.scatterplot(data=df, x='rank', y='time', hue='node', palette='tab20', s=50)
+        plt.legend(title='Node')
+
+        # Set plot title and labels
+        plt.title('Scatter Plot of Time per Rank Colored by Node')
+        plt.xlabel('Rank')
+        plt.ylabel('Time')
+
+        save_path = os.path.join(self.__plots_dir, f"rank_times.png")
+        plt.savefig(save_path)
+        plt.close()
+
+    def __plotClusteringResults(self, times, clusters, cluster_centers, threshold, representative_cluster):
+        unique_clusters = np.unique(np.array(clusters))
+        plt.figure(figsize=(16,9))
+        colors = plt.cm.Dark2(np.linspace(0, 1, len(unique_clusters)))
+
+        for i, cluster in enumerate(unique_clusters):
+            cluster_times = np.array([times[i] for i in range(len(times)) if clusters[i] == cluster])
+            plt.hist(cluster_times, bins=self.__freedmanDiaconisBins(cluster_times), alpha=0.8, label=f'Cluster {cluster} {'(representative)' if cluster == representative_cluster else ''}', color=colors[i])
+            plt.axvline(cluster_centers[cluster], label=f"Cluster {cluster} center", c=colors[cluster], linestyle=':')
+
+        plt.axvline(threshold, label=f"Threshold", c='Red', linestyle='--')
+        plt.axvline(np.array(times).mean(), label=f"Average of all times", c='Orange', linestyle='--')
+
+        plt.xlabel('Time')
+        plt.ylabel('Counts')
+        plt.title('Histogram of Times Colored by Proportion of Ranks in Clusters: Meanshift')
+        plt.grid()
+        plt.legend()
+
+        save_path = os.path.join(self.__plots_dir, f"clustering_results.png")
+        plt.savefig(save_path)
+        plt.close()
 
     ###########################################################################
     ## Parsing
@@ -229,17 +274,50 @@ class SlowNodeDetector:
         # return sorted(nodes, key=lambda n: self.__getNumberOfSlowRanksOnNode(n))
         return sorted(node_times, key=lambda t: node_times[t])
 
-    def __findHighOutliers(self, data):
+    def __findHighOutliers(self, data, method: str ='simple_avg'):
         """
         Finds data points that are some percentage (given by self.__threshold_pct)
         higher than the mean of the data.
         """
-        avg = np.mean(data)
-        threshold = avg * (1.0 + self.__threshold_pct)
-        outliers = [elt for elt in data if elt > threshold]
-        diffs = [t / avg for t in outliers]
-        assert len(outliers) == len(diffs) # sanity check
-        return outliers, diffs
+        if method == 'simple_avg':
+            avg = np.mean(data)
+            threshold = avg * (1.0 + self.__threshold_pct)
+            outliers = [elt for elt in data if elt > threshold]
+            diffs = [t / avg for t in outliers]
+            assert len(outliers) == len(diffs) # sanity check
+            return outliers, diffs
+        elif method == 'clustering':
+            data = np.array(data)
+            print(data)
+            from sklearn.cluster import MeanShift
+
+            ms = MeanShift().fit(data.reshape(-1, 1))
+            clusters = ms.predict(data.reshape(-1, 1))
+
+            print(f"Found {len(np.unique(np.array(clusters)))} clusters.")
+
+            cluster_dict = {}
+
+            for time, cluster in zip(data, clusters):
+                if cluster not in cluster_dict:
+                    cluster_dict[cluster] = []
+                cluster_dict[cluster].append(time)
+
+            cluster_centers = dict(zip(cluster_dict.keys(), list(ms.cluster_centers_.reshape(1, -1)[0])))
+
+            representative_cluster = max(cluster_dict.items(), key=lambda v: len(v[1]))[0]
+            print(f"Representative cluster: {representative_cluster}")
+            representative_center = cluster_centers[representative_cluster]
+            threshold = representative_center + 3 * np.std(cluster_dict[representative_cluster])
+
+            problematic_clusters = [cluster_id for cluster_id, center in cluster_centers.items() if center > threshold]
+            print(problematic_clusters)
+
+            self.__plotClusteringResults(data, clusters, cluster_centers, threshold, representative_cluster)
+            # outliers = [elt for problematic_cluster in problematic_clusters for elt in problematic_cluster]
+            # diffs = [t / representative_center for t in outliers]
+        else:
+            raise ValueError(f"Non valid outlier detection method: \"{method}\". Please select \"simple_avg\" or \"clustering\".")
 
 
     ###########################################################################
@@ -251,7 +329,9 @@ class SlowNodeDetector:
         find any slow (self.__threshold_pct slower than the mean) ranks.
         """
         rank_ids, total_times = zip(*self.__rank_times.items())
-        outliers, slowdowns = self.__findHighOutliers(total_times)
+        # outliers, slowdowns = self.__findHighOutliers(total_times)
+        self.__findHighOutliers(total_times, 'clustering')
+        raise RuntimeError("Stopping Early")
 
         self.__plotData(rank_ids, total_times, "Across-Rank Comparison", "Rank ID", outliers)
 
