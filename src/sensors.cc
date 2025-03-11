@@ -104,7 +104,7 @@ void writeSensorData(
       auto [socketId, coreNumber] = ordering[i];
       reduced_file << "Socket id " << socketId
                         << ", Core " << coreNumber
-                        << ": " << max_temps[i] << "°C\n";
+                        << ": " << max_temps[i] << " C\n";
     }
     reduced_file.close();
     std::cout << "Wrote sensor data for " << proc_name << " to " << reduced_filename << std::endl;
