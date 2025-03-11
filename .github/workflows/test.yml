@@ -35,14 +35,4 @@ jobs:
           pip install pytest
 
       - name: Run Tests
-        run: |
-          pytest
-
-      - name: Report Test results
-        uses: phoenix-actions/test-reporting@v15
-        if: success() || failure()
-        with:
-          name: Tests report (${{ matrix.os }}, ${{ matrix.python-version }})
-          path: artifacts/unittest/reports/TEST-*.xml
-          reporter: java-junit
-          output-to: step-summary
+        run: pytest
