@@ -31,7 +31,8 @@ class SlowNodeDetector:
         Node: Computing unit in a cluster
     """
 
-    def __init__(self, data_file, sensors_dir, num_nodes, threshold_percentage, sockets_per_node, ranks_per_node, plot_rank_breakdowns):
+    def __init__(
+            self, path, sensors, num_nodes, pct, spn, rpn, plot_rank_breakdowns):
         # Create empty dicts for storing data
         self.__rank_times = {}
         self.__rank_breakdowns = {}
@@ -40,14 +41,13 @@ class SlowNodeDetector:
         self.__overheated_nodes = {}
 
         # Initialize variables
-        self.__filepath = data_file
-        self.__sensors_dir = sensors_dir
+        self.__filepath = path
+        self.__sensors_dir = sensors
         self.__num_nodes = int(num_nodes) if num_nodes is not None else None
-        self.__threshold_pct = float(threshold_percentage)
-        self.__spn = int(sockets_per_node)
-        self.__rpn = int(ranks_per_node)
+        self.__threshold_pct = float(pct)
+        self.__spn = int(spn)
+        self.__rpn = int(rpn)
         self.__rps = self.__rpn / self.__spn
-        self.__avg_socket_temp = 0.0
         self.__temperature_analysis_available = True if self.__sensors_dir is not None else False
         self.__plot_rank_breakdowns = plot_rank_breakdowns
         self.__num_ranks = 0
@@ -57,14 +57,10 @@ class SlowNodeDetector:
         self.__slow_rank_slowdowns = {}
         self.__slow_node_names = []
         self.__slow_iterations = {}
-        self.__hot_sockets = []
-        self.__hot_sockets_diffs = {}
-        self.__hot_ranks = []
-        self.__hot_ranks_diffs = {}
 
         # Initialize (and create) directories
         self.__output_dir = os.path.join(
-            os.path.dirname(data_file),
+            os.path.dirname(path),
             "output")
         self.__plots_dir = os.path.join(
             self.__output_dir,
@@ -341,9 +337,22 @@ class SlowNodeDetector:
 
 
     ###########################################################################
+    ## Public getters
+
+    def getSlowRanks(self) -> dict:
+        return self.__slow_ranks
+
+    def getSlowNodes(self) -> list:
+        return self.__slow_node_names
+
+    def getOverheatedNodes(self) -> dict:
+        return self.__overheated_nodes
+
+
+    ###########################################################################
     ## Public functions
 
-    def detect(self):
+    def detect(self, print_results=True):
         """
         Main function of the SlowNodeDetector class.
         Parses the output file from the slow_node executable
@@ -380,60 +389,61 @@ class SlowNodeDetector:
                     rank_with_slowest_iteration = r_id
 
         # Print results
-        s = self.__s(slow_rank_ids)
-        n = len(str(abs(int(self.__num_ranks))))
-        print("\n----------------------------------------------------------")
-        print("Across-Rank Analysis")
-        print()
-        print(f"    {len(slow_rank_ids)} Outlier Rank{s} (at least {self.__threshold_pct:.0%} slower than the mean): {slow_rank_ids}")
-        if len(slow_rank_ids) > 0:
+        if print_results:
+            s = self.__s(slow_rank_ids)
+            n = len(str(abs(int(self.__num_ranks))))
+            print("\n----------------------------------------------------------")
+            print("Across-Rank Analysis")
             print()
-            print(f"    Slowdown % (Relative to Average) and Node for Slow Rank{s}:")
-            for rank in slow_rank_ids:
-                slowdown = self.__slow_rank_slowdowns[rank]
-                node = self.__rank_to_node_map[rank]
-                print(f"        {rank:>{n}}: {slowdown:.2%} ({node})")
+            print(f"    {len(slow_rank_ids)} Outlier Rank{s} (at least {self.__threshold_pct:.0%} slower than the mean): {slow_rank_ids}")
+            if len(slow_rank_ids) > 0:
+                print()
+                print(f"    Slowdown % (Relative to Average) and Node for Slow Rank{s}:")
+                for rank in slow_rank_ids:
+                    slowdown = self.__slow_rank_slowdowns[rank]
+                    node = self.__rank_to_node_map[rank]
+                    print(f"        {rank:>{n}}: {slowdown:.2%} ({node})")
+                print()
+            print(f"    Slowest Rank: {rank_ids[np.argmax(total_times)]} ({np.max(total_times)}s)")
+            print(f"    Fastest Rank: {rank_ids[np.argmin(total_times)]} ({np.min(total_times)}s)")
+            print(f"    Avg Time Across All Ranks: {np.mean(total_times)} s")
+            print(f"    Std Dev Across All Ranks: {np.std(total_times)} s")
             print()
-        print(f"    Slowest Rank: {rank_ids[np.argmax(total_times)]} ({np.max(total_times)}s)")
-        print(f"    Fastest Rank: {rank_ids[np.argmin(total_times)]} ({np.min(total_times)}s)")
-        print(f"    Avg Time Across All Ranks: {np.mean(total_times)} s")
-        print(f"    Std Dev Across All Ranks: {np.std(total_times)} s")
-        print()
-        if len(self.__slow_node_names) > 0:
-            s = self.__s(self.__slow_node_names)
-            print(f"    {len(self.__slow_node_names)} node{s} will be excluded from the hostfile:")
-            for node_name in self.__slow_node_names:
-                print(f"        {node_name} ({self.__getNumberOfSlowRanksOnNode(node_name)} slow ranks)")
-        else:
-            print(f"    No nodes had more than {int(self.__rps)} slow ranks.")
-        print()
-
-        if self.__temperature_analysis_available:
-            print("Temperature Analysis")
-            print()
-            core_temp_outputs = []
-            for n_id, n_data in self.__overheated_nodes.items():
-                for s_id, s_data in n_data.items():
-                    for c_id, c_data in s_data.items():
-                        diff = c_data["diff"]
-                        temp = c_data["temperature"]
-                        core_temp_outputs.append(f"        Core {c_id}: {temp} C ({diff:.0%} hotter than mean) - {n_id} (socket {s_id})")
-            s = self.__s(core_temp_outputs)
-            print(f"    Found {len(core_temp_outputs)} over-heated cores:")
-            for core_temp_output in core_temp_outputs:
-                print(core_temp_output)
+            if len(self.__slow_node_names) > 0:
+                s = self.__s(self.__slow_node_names)
+                print(f"    {len(self.__slow_node_names)} node{s} will be excluded from the hostfile:")
+                for node_name in self.__slow_node_names:
+                    print(f"        {node_name} ({self.__getNumberOfSlowRanksOnNode(node_name)} slow ranks)")
+            else:
+                print(f"    No nodes had more than {int(self.__rps)} slow ranks.")
             print()
 
-        s = self.__s(ranks_with_outlying_iterations)
-        print("Intra-Rank Analysis")
-        print()
-        print(f"    {len(ranks_with_outlying_iterations)} Rank{s} With Outlying Iterations: {ranks_with_outlying_iterations}")
-        print(f"    Slowest Iteration: {slowest_iteration} on Rank {rank_with_slowest_iteration} ({self.__rank_to_node_map[rank_with_slowest_iteration]}) - {slowest_time}s")
-        print()
+            if self.__temperature_analysis_available:
+                print("Temperature Analysis")
+                print()
+                core_temp_outputs = []
+                for n_id, n_data in self.__overheated_nodes.items():
+                    for s_id, s_data in n_data.items():
+                        for c_id, c_data in s_data.items():
+                            diff = c_data["diff"]
+                            temp = c_data["temperature"]
+                            core_temp_outputs.append(f"        Core {c_id}: {temp} C ({diff:.0%} hotter than mean) - {n_id} (socket {s_id})")
+                s = self.__s(core_temp_outputs)
+                print(f"    Found {len(core_temp_outputs)} over-heated cores:")
+                for core_temp_output in core_temp_outputs:
+                    print(core_temp_output)
+                print()
 
-        print(f"View generated plots in {self.__plots_dir}.")
-        print("----------------------------------------------------------")
-        print()
+            s = self.__s(ranks_with_outlying_iterations)
+            print("Intra-Rank Analysis")
+            print()
+            print(f"    {len(ranks_with_outlying_iterations)} Rank{s} With Outlying Iterations: {ranks_with_outlying_iterations}")
+            print(f"    Slowest Iteration: {slowest_iteration} on Rank {rank_with_slowest_iteration} ({self.__rank_to_node_map[rank_with_slowest_iteration]}) - {slowest_time}s")
+            print()
+
+            print(f"View generated plots in {self.__plots_dir}.")
+            print("----------------------------------------------------------")
+            print()
 
     def createHostfile(self):
         """
@@ -505,12 +515,12 @@ def main():
     sensors_dir = getFilepath(args.sensors) if args.sensors is not None else None
 
     slowNodeDetector = SlowNodeDetector(
-        data_file=filepath,
-        sensors_dir=sensors_dir,
+        path=filepath,
+        sensors=sensors_dir,
         num_nodes=args.num_nodes,
-        threshold_percentage=args.threshold,
-        sockets_per_node=args.spn,
-        ranks_per_node=args.rpn,
+        pct=args.threshold,
+        spn=args.spn,
+        rpn=args.rpn,
         plot_rank_breakdowns=args.plot_all_ranks)
 
     slowNodeDetector.detect()
