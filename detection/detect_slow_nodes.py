@@ -172,45 +172,21 @@ class SlowNodeDetector:
         """
         all_sensor_files = [(os.path.join(self.__sensors_dir, log)) for log in os.listdir(self.__sensors_dir)]
         for sensor_file in all_sensor_files:
-            sensors_pattern = r".*/sensors_(?P<name>.+?)_(?P<id>\d+)\.log"
-            node_name, rank_str = self.__matchRegex(sensors_pattern, sensor_file)
+            sensors_pattern = r".*/sensors_(?P<name>.+?)\.log"
+            node_name = self.__matchRegex(sensors_pattern, sensor_file)[0]
             if node_name not in self.__node_temps:
                 self.__node_temps = {node_name: {}}
-            current_rank = int(rank_str)
-            current_socket = -1
             with open(sensor_file, 'r') as sensor_data:
                 for line in sensor_data:
+                    pattern = r"Socket id (\d+), Core (\d+): (\d+)(?:°C| C)"
+                    socket_str, core_str, temp_str = self.__matchRegex(pattern, line)
+                    socket_id = int(socket_str)
+                    core_id = int(core_str)
+                    temp = float(temp_str)
+                    if socket_id not in self.__node_temps[node_name]:
+                        self.__node_temps[node_name][socket_id] = {}
+                    self.__node_temps[node_name][socket_id][core_id] = temp
 
-                    # Note: The following comments use sample `sensors` output from StackExchange:
-                    # https://unix.stackexchange.com/questions/740689/why-arent-the-cpu-core-numbers-in-sensors-output-consecutive
-
-                    # Package id 0:  +73.0°C  (high = +80.0°C, crit = +100.0°C)
-                    if line.startswith("Package id"):
-                        socket_pattern = r"Package id\s+(\d+):\s+\+([\d.]+)(?:°C| C)\s+\(high = \+([\d.]+)(?:°C| C)"
-                        socket_id, socket_temp, socket_high = self.__matchRegex(socket_pattern, line)
-                        current_socket = int(socket_id)
-                        if current_socket not in self.__node_temps[node_name]:
-                            self.__node_temps[node_name] = {
-                                current_socket: {
-                                    "temperature": float(socket_temp),
-                                    "cores": {}
-                                }
-                            }
-
-                    # Core 0:        +46.0°C  (high = +80.0°C, crit = +100.0°C)
-                    elif line.startswith("Core"):
-                        core_pattern = r"Core\s+(\d+):\s+\+([\d.]+)(?:°C| C)\s+\(high = \+([\d.]+)(?:°C| C)"
-                        core_id, core_temp, core_high = self.__matchRegex(core_pattern, line)
-                        current_core = int(core_id)
-                        current_temp = float(core_temp)
-                        all_cores_on_this_socket = self.__node_temps[node_name][current_socket]["cores"]
-                        if current_core not in all_cores_on_this_socket:
-                            all_cores_on_this_socket[current_core] = current_temp
-                        else:
-                            all_cores_on_this_socket[current_core] = max(
-                                all_cores_on_this_socket[current_core],
-                                current_temp
-                            )
 
     ###########################################################################
     ## Secondary analytical functions
@@ -318,12 +294,11 @@ class SlowNodeDetector:
         Identifies over-heated sockets and ranks.
         """
         self.__parseSensors()
-        all_cores_and_temps = {}
         for n_id, node_data in self.__node_temps.items():
             for s_id, socket_data in node_data.items():
-                outliers, diffs = self.__findHighOutliers(list(socket_data["cores"].values()))
+                outliers, diffs = self.__findHighOutliers(list(socket_data.values()))
                 i = 0
-                for c_id, core_temp in socket_data["cores"].items():
+                for c_id, core_temp in socket_data.items():
                     if core_temp in outliers:
                         if n_id not in self.__overheated_nodes:
                             self.__overheated_nodes[n_id] = {}
@@ -429,7 +404,7 @@ class SlowNodeDetector:
                             temp = c_data["temperature"]
                             core_temp_outputs.append(f"        Core {c_id}: {temp} C ({diff:.0%} hotter than mean) - {n_id} (socket {s_id})")
                 s = self.__s(core_temp_outputs)
-                print(f"    Found {len(core_temp_outputs)} over-heated cores:")
+                print(f"    Found {len(core_temp_outputs)} over-heated cores")
                 for core_temp_output in core_temp_outputs:
                     print(core_temp_output)
                 print()

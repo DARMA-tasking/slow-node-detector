@@ -1,10 +1,5 @@
 
-#include <vector>
-#include <fstream>
-#include <iostream>
-#include <filesystem>
-
-#include <mpi.h>
+#include "sensors.h"
 
 #include <Kokkos_Random.hpp>
 #include <KokkosBlas3_gemm.hpp>
@@ -44,31 +39,6 @@ std::tuple<std::vector<double>, double> runBenchmark() {
   return std::make_tuple(iter_timings, total_time);
 }
 
-void runSensors(int rank, const std::string& proc_name) {
-  // Set up log files
-  std::filesystem::path output_dir = "sensors_output";
-  std::filesystem::path filename = output_dir / ("sensors_" + proc_name + "_" + std::to_string(rank) + ".log");
-  std::filesystem::create_directories(output_dir);
-  std::ofstream log_file(filename);
-  if (!log_file) {
-      std::cerr << "Error: Unable to open " << filename << " for writing.\n";
-      return;
-  }
-
-  // Get output from `sensors`
-  FILE* pipe = popen("sensors", "r");
-  if (!pipe) {
-      std::cerr << "Error: Unable to run sensors command\n";
-      return;
-  }
-  char buffer[256];
-  while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-      log_file << buffer;
-  }
-  pclose(pipe);
-  log_file.close();
-}
-
 int main(int argc, char** argv) {
   if (argc > 1) {
     iters = atoi(argv[1]);
@@ -88,11 +58,8 @@ int main(int argc, char** argv) {
   int name_len;
   MPI_Get_processor_name(processor_name, &name_len);
 
-  if (rank == 0) system("mkdir -p sensors_output");
-  MPI_Barrier(MPI_COMM_WORLD);
-
   auto const& [iter_timings, total_time] = runBenchmark();
-  runSensors(rank, processor_name);
+  sensors::runSensorsAndReduceOutput(rank, processor_name);
 
   std::vector<double> all_times;
   all_times.resize(num_ranks);

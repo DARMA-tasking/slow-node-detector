@@ -14,13 +14,13 @@ class TestConfig(unittest.TestCase):
         self.sensors_dir = os.path.join(self.logs_dir, "sensors_output")
 
         # Define initialization variables
-        self.rpn = 6
+        self.rpn = 12
         self.spn = 1
 
         # Determine expected values
-        self.expected_slow_ranks = list(range(6, 12))
-        self.expected_slow_nodes = ["n1"]
-        self.expected_overheated_nodes = []
+        self.expected_slow_ranks = [1, 2, 4, 6, 7, 9, 10, 11]
+        self.expected_slow_nodes = []
+        self.expected_overheated_nodes = ["ozark"]
 
         # Instantiate detector
         self.detector = SlowNodeDetector(
