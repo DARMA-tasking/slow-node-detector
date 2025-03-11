@@ -171,7 +171,7 @@ class SlowNodeDetector:
 
         plt.xlabel('Time')
         plt.ylabel('Counts')
-        plt.title('Histogram of Times Colored by Proportion of Ranks in Clusters: Meanshift')
+        plt.title('Histogram of Times Colored by Cluster: Meanshift results')
         plt.grid()
         plt.legend()
 
@@ -288,8 +288,28 @@ class SlowNodeDetector:
         """
         data, clusters, cluster_to_times, cluster_to_ranks, cluster_centers, representative_cluster, representative_center, threshold, problematic_clusters = self.__clusterTimes(data)
 
-        node_to_ranks = {}
+        ## warnings if representative cluster is actually the slowest
+        # identify if representative cluster has slowest center
+        representative_cluster_is_slowest = True
+        slowest_non_representative_center = 0.
+        fastest_non_representative_center = np.inf
+        for cluster_center in {k: v for k, v in cluster_centers.items() if k != representative_cluster}.values():
+            if cluster_center > representative_center:
+                representative_cluster_is_slowest = False
+            if cluster_center > slowest_non_representative_center:
+                slowest_non_representative_center = cluster_center
+            if cluster_center < fastest_non_representative_center:
+                fastest_non_representative_center = cluster_center
 
+        # if representative cluster is slowest, check by how much
+        if representative_cluster_is_slowest:
+            if representative_center - 3 * np.std(cluster_to_times[representative_cluster]) > slowest_non_representative_center:
+                print()
+                print(f"     WARNING: Clustering results found most times to be slower than others. No outliers will be detected.")
+                print(f"              Most times are centered around {representative_center:.2f}, but other ranks ran in {fastest_non_representative_center:.2f}-{slowest_non_representative_center:.2f}s")
+                print()
+
+        node_to_ranks = {}
         for rank, node in self.__rank_to_node_map.items():
             if node not in node_to_ranks:
                 node_to_ranks[node] = []
