@@ -54,4 +54,3 @@ Sensor 2:     +34.9°C  (low  = -273.1°C, high = +65261.8°C)
 acpitz-acpi-0
 Adapter: ACPI interface
 temp1:        +32.0°C
-
