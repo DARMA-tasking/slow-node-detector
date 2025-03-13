@@ -112,9 +112,10 @@ void writeSensorData(
 
 void runSensorsAndReduceOutput(int rank, const std::string& proc_name) {
   // Set up
-  auto proc_hash = std::hash<std::string>{}(proc_name);
+  size_t proc_hash = std::hash<std::string>{}(proc_name);
+  int color = static_cast<int>(proc_hash % std::numeric_limits<int>::max());
   MPI_Comm node_comm;
-  MPI_Comm_split(MPI_COMM_WORLD, proc_hash, rank, &node_comm);
+  MPI_Comm_split(MPI_COMM_WORLD, color, rank, &node_comm);
   MPI_Barrier(MPI_COMM_WORLD);
 
   // Get output from `sensors`
