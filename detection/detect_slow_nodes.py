@@ -158,11 +158,13 @@ class SlowNodeDetector:
 
         for i, cluster in enumerate(unique_clusters):
             cluster_times = np.array([times[i] for i in range(len(times)) if clusters[i] == cluster])
+            representative_label = '(representative)' if cluster == representative_cluster else ''
+            outlier_label = '(outlier)' if cluster_centers[cluster] > threshold else ''
             plt.hist(
                 cluster_times,
                 bins=self.__freedmanDiaconisBins(cluster_times),
                 alpha=0.8,
-                label=f'Cluster {cluster} {'(representative)' if cluster == representative_cluster else ''}{'(outlier)' if cluster_centers[cluster] > threshold else ''}', color=colors[i]
+                label=f'Cluster {cluster} {representative_label}{outlier_label}', color=colors[i]
             )
             plt.axvline(cluster_centers[cluster], label=f"Cluster {cluster} center", c=colors[cluster], linestyle=':')
 
