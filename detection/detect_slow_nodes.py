@@ -315,12 +315,15 @@ class SlowNodeDetector:
     ## Public getters
 
     def getSlowRanks(self) -> dict:
+        """Return map of slow rank IDs to their times."""
         return self.__slow_ranks
 
     def getSlowNodes(self) -> list:
+        """Return list of slow node names."""
         return self.__slow_node_names
 
     def getOverheatedNodes(self) -> dict:
+        """Return map of slow node names to the sockets and cores on each node."""
         return self.__overheated_nodes
 
 

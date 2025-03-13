@@ -59,7 +59,7 @@ int main(int argc, char** argv) {
   MPI_Get_processor_name(processor_name, &name_len);
 
   auto const& [iter_timings, total_time] = runBenchmark();
-  sensors::runSensorsAndReduceOutput(rank, processor_name);
+  sensors::runSensorsAndReduceOutput(processor_name);
 
   std::vector<double> all_times;
   all_times.resize(num_ranks);
