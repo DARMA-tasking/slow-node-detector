@@ -31,6 +31,7 @@ class TestConfig(unittest.TestCase):
             spn=self.spn,
             rpn=self.rpn,
             plot_rank_breakdowns=False,
+            use_clstr=False
         )
 
         # Run detection

@@ -33,7 +33,7 @@ class SlowNodeDetector:
     """
 
     def __init__(
-            self, path, sensors, num_nodes, pct, spn, rpn, plot_rank_breakdowns):
+            self, path, sensors, num_nodes, pct, spn, rpn, plot_rank_breakdowns, use_clstr):
         # Create empty dicts for storing data
         self.__rank_times = {}
         self.__rank_breakdowns = {}
@@ -52,7 +52,7 @@ class SlowNodeDetector:
         self.__temperature_analysis_available = True if self.__sensors_output_file is not None else False
         self.__plot_rank_breakdowns = plot_rank_breakdowns
         self.__num_ranks = 0
-        self.__use_clustering = use_clustering
+        self.__use_clustering = use_clstr
 
         # Initialize outliers
         self.__slow_ranks = {}
@@ -663,10 +663,11 @@ def main():
         path=filepath,
         sensors=sensors_filepath,
         num_nodes=args.num_nodes,
-        threshold_percentage=args.threshold,
-        sockets_per_node=args.spn,
-        ranks_per_node=args.rpn,
-        plot_rank_breakdowns=args.plot_all_ranks)
+        pct=args.threshold,
+        spn=args.spn,
+        rpn=args.rpn,
+        plot_rank_breakdowns=args.plot_all_ranks,
+        use_clstr=args.use_clustering)
 
     slowNodeDetector.detect()
     slowNodeDetector.createHostfile()
