@@ -288,7 +288,15 @@ class SlowNodeDetector:
         """
         Finds rank outliers by their total execution times.
         """
-        data, clusters, cluster_to_times, cluster_to_ranks, cluster_centers, representative_cluster, representative_center, threshold, problematic_clusters = self.__clusterTimes(data)
+        data,                   \
+        clusters,               \
+        cluster_to_times,       \
+        cluster_to_ranks,       \
+        cluster_centers,        \
+        representative_cluster, \
+        representative_center,  \
+        threshold,              \
+        problematic_clusters = self.__clusterTimes(data)
 
         ## warnings if representative cluster is actually the slowest
         # identify if representative cluster has slowest center
@@ -308,7 +316,11 @@ class SlowNodeDetector:
             if representative_center - 3 * np.std(cluster_to_times[representative_cluster]) > slowest_non_representative_center:
                 print()
                 print(f"     WARNING: Clustering results found most times to be slower than others. No outliers will be detected.")
-                print(f"              Most times are centered around {representative_center:.2f}, but other ranks ran in {fastest_non_representative_center:.2f}-{slowest_non_representative_center:.2f}s")
+                print(
+                    f"              Most times are centered around {representative_center:.2f}, "
+                    f"but other ranks ran in {fastest_non_representative_center:.2f}-"
+                    f"{slowest_non_representative_center:.2f}s"
+                )
                 print()
 
         node_to_ranks = {}
@@ -320,7 +332,11 @@ class SlowNodeDetector:
         # write clustering results to file
         with open(os.path.join(self.__output_dir, f"clustering_results.txt"), 'w') as file:
             for cluster in sorted(np.unique(np.array(clusters))):
-                file.write(f"* Cluster {cluster} {'(representative)' if cluster == representative_cluster else ''}{'(outlier)' if cluster_centers[cluster] > threshold else ''}:\n")
+                representative_label = '(representative)' if cluster == representative_cluster else ''
+                outlier_label = '(outlier)' if cluster_centers[cluster] > threshold else ''
+                file.write(
+                    f"* Cluster {cluster} {representative_label} {outlier_label}:\n"
+                )
 
                 # Print ranks in cluster, grouped by nodes
                 for node, ranks in node_to_ranks.items():
@@ -383,7 +399,9 @@ class SlowNodeDetector:
         print(f"Representative cluster: {representative_cluster}")
         print()
         for cluster in sorted(np.unique(np.array(clusters))):
-            print(f" * Cluster {cluster} {'(representative)' if cluster == representative_cluster else ''}{'(outlier)' if cluster_centers[cluster] > threshold else ''} contains:")
+            representative_label = '(representative)' if cluster == representative_cluster else ''
+            outlier_label = '(outlier)' if cluster_centers[cluster] > threshold else ''
+            print(f" * Cluster {cluster} {representative_label}{outlier_label} contains:")
             cluster_nodes = []
             for rank, node in self.__rank_to_node_map.items():
                 if rank in cluster_to_ranks[cluster]:
