@@ -131,6 +131,7 @@ void writeSensorData(
   std::vector<int>& all_socket_orders,
   std::vector<int>& all_core_orders,
   std::vector<int>& all_num_values,
+  std::vector<int>& all_node_ids,
   std::map<int, std::string>& node_map
 ) {
   std::filesystem::path reduced_filename = "sensors.log";
@@ -142,10 +143,12 @@ void writeSensorData(
 
   // Use the ordering vectors to map back to socket and core IDs.
   int iter = 0;
+  int node_id;
   std::string node_name;
   for (size_t i = 0; i < all_max_temps.size(); i++) {
     if (i % all_num_values[iter] == 0) {
-      node_name = node_map[iter];
+      node_id = all_node_ids[iter];
+      node_name = node_map[node_id];
       reduced_file << "\nNode: " << node_name << "\n";
       iter++;
     }
@@ -278,7 +281,7 @@ void runSensorsAndReduceOutput(const std::string& proc_name) {
       for (int i = 0; i < num_nodes; ++i) {
         node_map[all_node_ids[i]] = std::string(all_names.data() + displs[i], name_lengths[i]);
       }
-      writeSensorData(all_max_temps, all_socket_orders, all_core_orders, all_num_values, node_map);
+      writeSensorData(all_max_temps, all_socket_orders, all_core_orders, all_num_values, all_node_ids, node_map);
     }
   }
   MPI_Comm_free(&node_comm);
