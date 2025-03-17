@@ -165,8 +165,11 @@ void runSensorsAndReduceOutput(const std::string& proc_name) {
   MPI_Comm node_comm;
   MPI_Comm_split(MPI_COMM_WORLD, node_id, global_rank, &node_comm);
 
-  // Determine which ranks will be "leaders"
+  // Determine which ranks will be "leaders" and write out the node name
   int node_leader = 0;
+  if (node_rank == node_leader) {
+    std::cout << "Node " << node_id << ": " << proc_name << std::endl;
+  }
 
   // Get output from `sensors`
   auto socketCoreTemps = runSensors();

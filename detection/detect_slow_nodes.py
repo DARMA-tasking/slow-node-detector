@@ -37,18 +37,19 @@ class SlowNodeDetector:
         self.__rank_times = {}
         self.__rank_breakdowns = {}
         self.__rank_to_node_map = {} # Maps each rank to the name of its corresponding node
+        self.__node_id_to_node_name_map = {}
         self.__node_temps = {}
         self.__overheated_nodes = {}
 
         # Initialize variables
         self.__filepath = path
-        self.__sensors_dir = sensors
+        self.__sensors_output_file = sensors
         self.__num_nodes = int(num_nodes) if num_nodes is not None else None
         self.__threshold_pct = float(pct)
         self.__spn = int(spn)
         self.__rpn = int(rpn)
         self.__rps = self.__rpn / self.__spn
-        self.__temperature_analysis_available = True if self.__sensors_dir is not None else False
+        self.__temperature_analysis_available = True if self.__sensors_output_file is not None else False
         self.__plot_rank_breakdowns = plot_rank_breakdowns
         self.__num_ranks = 0
 
@@ -137,6 +138,11 @@ class SlowNodeDetector:
         with open(self.__filepath, "r") as output:
             for line in output:
 
+                if line.startswith("Node"):
+                    node_pattern = r"Node (\d+): (.+)"
+                    node_id_str, node_name = self.__matchRegex(node_pattern, line)
+                    self.__node_id_to_node_name_map[int(node_id_str)] = node_name
+
                 if line.startswith("gather"):
                     # splits: ['gather', rank_info, total_time, 'breakdown', [times]]
                     splits = line.split(":")
@@ -170,14 +176,16 @@ class SlowNodeDetector:
         Iterates through the sensors directory (given with -s on the command line) and identifies the maximum
         temperature of each rank on that node.
         """
-        all_sensor_files = [(os.path.join(self.__sensors_dir, log)) for log in os.listdir(self.__sensors_dir)]
-        for sensor_file in all_sensor_files:
-            sensors_pattern = r".*/sensors_(?P<name>.+?)\.log"
-            node_name = self.__matchRegex(sensors_pattern, sensor_file)[0]
-            if node_name not in self.__node_temps:
-                self.__node_temps = {node_name: {}}
-            with open(sensor_file, 'r') as sensor_data:
-                for line in sensor_data:
+
+        with open(self.__sensors_output_file, 'r') as sensor_data:
+            for line in sensor_data:
+                if line.startswith("Node"):
+                    node_id = int(line.split(":")[-1].strip())
+                    assert node_id in self.__node_id_to_node_name_map, f"Unrecognized node ID: {node_id}"
+                    node_name = self.__node_id_to_node_name_map[node_id]
+                    if node_name not in self.__node_temps:
+                        self.__node_temps = {node_name: {}}
+                elif line.startswith("Socket"):
                     pattern = r"Socket id (\d+), Core (\d+): (\d+)(?:°C| C)"
                     socket_str, core_str, temp_str = self.__matchRegex(pattern, line)
                     socket_id = int(socket_str)
@@ -405,7 +413,7 @@ class SlowNodeDetector:
                         for c_id, c_data in s_data.items():
                             diff = c_data["diff"]
                             temp = c_data["temperature"]
-                            core_temp_outputs.append(f"        Core {c_id}: {temp} C ({diff:.0%} hotter than mean) - {n_id} (socket {s_id})")
+                            core_temp_outputs.append(f"        Core {c_id}: {temp} C ({diff:.0%} hotter than mean on this socket) - {n_id} (socket {s_id})")
                 s = self.__s(core_temp_outputs)
                 print(f"    Found {len(core_temp_outputs)} over-heated cores")
                 for core_temp_output in core_temp_outputs:
@@ -481,7 +489,7 @@ def main():
     """
     parser = argparse.ArgumentParser(description='Slow Rank Detector script.')
     parser.add_argument('-f', '--filepath', help='Absolute or relative path to the output file from running slow_node executable', required=True)
-    parser.add_argument('-s', '--sensors', help='Absolute or relative path to the directory containing all sensor logs', default=None)
+    parser.add_argument('-s', '--sensors', help='Absolute or relative path to the sensors.log file', default=None)
     parser.add_argument('-N', '--num_nodes', help='The number of nodes required by the application', default=None)
     parser.add_argument('-t', '--threshold', help='Percentage above average time that indicates a "slow" rank', default=0.05)
     parser.add_argument('-spn', '--spn', help='Number of sockets per node', default=2)
@@ -490,11 +498,11 @@ def main():
     args = parser.parse_args()
 
     filepath = getFilepath(args.filepath)
-    sensors_dir = getFilepath(args.sensors) if args.sensors is not None else None
+    sensors_filepath = getFilepath(args.sensors) if args.sensors is not None else None
 
     slowNodeDetector = SlowNodeDetector(
         path=filepath,
-        sensors=sensors_dir,
+        sensors=sensors_filepath,
         num_nodes=args.num_nodes,
         pct=args.threshold,
         spn=args.spn,
