@@ -145,12 +145,14 @@ void writeSensorData(
   int iter = 0;
   int node_id;
   std::string node_name;
+  int num_entries_on_this_node;
   for (size_t i = 0; i < all_max_temps.size(); i++) {
-    if (i % all_num_values[iter] == 0) {
+    num_entries_on_this_node = all_num_values[iter];
+    if (i % num_entries_on_this_node == 0) {
       node_id = all_node_ids[iter];
       node_name = node_map[node_id];
       reduced_file << "\nNode: " << node_name << "\n";
-      iter++;
+      if (i > 0) iter++;
     }
     reduced_file << "Socket id " << all_socket_orders[i]
                  << ", Core "    << all_core_orders[i]
