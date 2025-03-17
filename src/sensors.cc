@@ -3,6 +3,7 @@
 #include <fstream>
 #include <filesystem>
 #include <cstdio>
+#include <cassert>
 #include <functional>
 
 #include "sensors.h"
@@ -165,8 +166,7 @@ void runSensorsAndReduceOutput(const std::string& proc_name) {
   MPI_Comm_split(MPI_COMM_WORLD, node_id, global_rank, &node_comm);
 
   // Determine which ranks will be "leaders"
-  int global_leader = 0;
-  int node_leader = 1;
+  int node_leader = 0;
 
   // Get output from `sensors`
   auto socketCoreTemps = runSensors();
@@ -193,50 +193,66 @@ void runSensorsAndReduceOutput(const std::string& proc_name) {
    *
    * for example, max_temps[i] is for core <core_order[i]> of socket <socket_order[i]>
    *
-   * node_leader is also holding num_values, an int that says how many cores/sockets/temps are in those vectors
-
    * global_leader needs to concatenate all of these vectors from the node_leaders
    */
 
-   int total_num_entries = num_values * num_nodes;
-  std::vector<int> all_num_values(num_nodes, num_values);
-  std::vector<int> displacements(num_nodes);
-  std::vector<double> all_max_temps(total_num_entries);
-  std::vector<int> all_socket_orders(total_num_entries);
-  std::vector<int> all_core_orders(total_num_entries);
-  MPI_Barrier(MPI_COMM_WORLD);
-  if (node_rank == node_leader) {
-    for (int i=1; i<num_nodes; i++) {
-      displacements[i] = displacements[i-1] + all_num_values[i-1];
+  // Create a new communicator with only the leaders
+  int color = node_rank == node_leader ? 1 : 0;
+  MPI_Comm leader_comm;
+  MPI_Comm_split(MPI_COMM_WORLD, color, global_rank, &leader_comm);
+
+  // Determine the ID of the output rank on this new communicator
+  if (color == 1) {
+    int output_rank_in_leader_comm;
+    bool on_output_rank = node_rank == node_leader && node_id == 0;
+    if (on_output_rank) {
+      assert(global_rank == 0);
+      MPI_Comm_rank(leader_comm, &output_rank_in_leader_comm);
     }
-    MPI_Gatherv(max_temps.data(), num_values, MPI_DOUBLE,
-                all_max_temps.data(), all_num_values.data(), displacements.data(), MPI_DOUBLE,
-                global_leader, MPI_COMM_WORLD);
-    MPI_Gatherv(socket_order.data(), num_values, MPI_INT,
-                all_socket_orders.data(), all_num_values.data(), displacements.data(), MPI_INT,
-                global_leader, MPI_COMM_WORLD);
-    MPI_Gatherv(core_order.data(), num_values, MPI_INT,
-                all_core_orders.data(), all_num_values.data(), displacements.data(), MPI_INT,
-                global_leader, MPI_COMM_WORLD);
-  }
-  MPI_Barrier(MPI_COMM_WORLD);
+    MPI_Bcast(&output_rank_in_leader_comm, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-  /*
-   * so global_leader now holds three vectors:
-   *    all_max_temps - a vector containing all of the values of max_temps vectors, IN ORDER
-   *    all_socket_orders - a vector containing all of the IDs from socket_order vectors, IN ORDER
-   *    all_core_orders - a vector containing all of the IDs from core_order vectors, IN ORDER
-   *
-   *    all_num_values - a vector containing the number of values that came from each node
-   *        so if there are two nodes with 16 cores each, this would be [16, 16]
+    std::vector<int> recv_counts(num_nodes);
+    int local_size = max_temps.size();
+    MPI_Gather(&local_size, 1, MPI_INT, recv_counts.data(), 1, MPI_INT, output_rank_in_leader_comm, leader_comm);
 
-   * global_leader can then iterate through the all_max_temps vector, matching with the socket and core from the order vectors
-   * once all_num_values[i] is reached, a newline is created and a new node begins
+    std::vector<int> displs(num_nodes, 0);
+    int total_size = 0;
+    if (on_output_rank) {
+        for (int i = 0; i < num_nodes; ++i) {
+            displs[i] = total_size;
+            total_size += recv_counts[i];
+        }
+    }
 
-   * the only remaining problem is getting the node name on global_leader
-   */
-  if (global_rank == global_leader) {
-  writeSensorData(all_max_temps, all_socket_orders, all_core_orders, num_values);
+    std::vector<double> all_max_temps(total_size);
+    std::vector<int> all_socket_orders(total_size);
+    std::vector<int> all_core_orders(total_size);
+
+    MPI_Gatherv(max_temps.data(), local_size, MPI_DOUBLE,
+                all_max_temps.data(), recv_counts.data(), displs.data(), MPI_DOUBLE,
+                output_rank_in_leader_comm, leader_comm);
+    MPI_Gatherv(socket_order.data(), local_size, MPI_INT,
+                all_socket_orders.data(), recv_counts.data(), displs.data(), MPI_INT,
+                output_rank_in_leader_comm, leader_comm);
+    MPI_Gatherv(core_order.data(), local_size, MPI_INT,
+                all_core_orders.data(), recv_counts.data(), displs.data(), MPI_INT,
+                output_rank_in_leader_comm, leader_comm);
+    MPI_Comm_free(&leader_comm);
+
+    /*
+    * so global_leader now holds three vectors:
+    *    all_max_temps - a vector containing all of the values of max_temps vectors, IN ORDER
+    *    all_socket_orders - a vector containing all of the IDs from socket_order vectors, IN ORDER
+    *    all_core_orders - a vector containing all of the IDs from core_order vectors, IN ORDER
+
+    * global_leader can then iterate through the all_max_temps vector, matching with the socket and core from the order vectors
+
+    * the only remaining problem is getting the node name on global_leader
+    */
+
+    if (on_output_rank) {
+      writeSensorData(all_max_temps, all_socket_orders, all_core_orders, num_values);
+    }
   }
   MPI_Comm_free(&node_comm);
 }
