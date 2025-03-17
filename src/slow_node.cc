@@ -1,8 +1,5 @@
 
-#include <iostream>
-#include <vector>
-
-#include <mpi.h>
+#include "sensors.h"
 
 #include <Kokkos_Random.hpp>
 #include <KokkosBlas3_gemm.hpp>
@@ -52,8 +49,6 @@ int main(int argc, char** argv) {
   MPI_Init(&argc, &argv);
   Kokkos::initialize(argc, argv);
 
-  auto const& [iter_timings, total_time] = runBenchmark();
-
   int rank = -1;
   int num_ranks = 0;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -62,6 +57,9 @@ int main(int argc, char** argv) {
   char processor_name[MPI_MAX_PROCESSOR_NAME];
   int name_len;
   MPI_Get_processor_name(processor_name, &name_len);
+
+  auto const& [iter_timings, total_time] = runBenchmark();
+  sensors::runSensorsAndReduceOutput(processor_name);
 
   std::vector<double> all_times;
   all_times.resize(num_ranks);
