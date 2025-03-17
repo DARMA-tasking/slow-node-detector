@@ -37,7 +37,6 @@ class SlowNodeDetector:
         self.__rank_times = {}
         self.__rank_breakdowns = {}
         self.__rank_to_node_map = {} # Maps each rank to the name of its corresponding node
-        self.__node_id_to_node_name_map = {}
         self.__node_temps = {}
         self.__overheated_nodes = {}
 
@@ -137,12 +136,6 @@ class SlowNodeDetector:
         current_rank, current_core = -1, -1
         with open(self.__filepath, "r") as output:
             for line in output:
-
-                if line.startswith("Node"):
-                    node_pattern = r"Node (\d+): (.+)"
-                    node_id_str, node_name = self.__matchRegex(node_pattern, line)
-                    self.__node_id_to_node_name_map[int(node_id_str)] = node_name
-
                 if line.startswith("gather"):
                     # splits: ['gather', rank_info, total_time, 'breakdown', [times]]
                     splits = line.split(":")
@@ -180,9 +173,7 @@ class SlowNodeDetector:
         with open(self.__sensors_output_file, 'r') as sensor_data:
             for line in sensor_data:
                 if line.startswith("Node"):
-                    node_id = int(line.split(":")[-1].strip())
-                    assert node_id in self.__node_id_to_node_name_map, f"Unrecognized node ID: {node_id}"
-                    node_name = self.__node_id_to_node_name_map[node_id]
+                    node_name = line.split(":")[-1].strip()
                     if node_name not in self.__node_temps:
                         self.__node_temps = {node_name: {}}
                 elif line.startswith("Socket"):

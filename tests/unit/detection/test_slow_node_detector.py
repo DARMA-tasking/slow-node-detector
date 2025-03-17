@@ -11,7 +11,7 @@ class TestConfig(unittest.TestCase):
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
             "logs")
         self.filepath = os.path.join(self.logs_dir, "slownode.log")
-        self.sensors_dir = os.path.join(self.logs_dir, "sensors_output")
+        self.sensors_file = os.path.join(self.logs_dir, "sensors.log")
 
         # Define initialization variables
         self.rpn = 12
@@ -25,7 +25,7 @@ class TestConfig(unittest.TestCase):
         # Instantiate detector
         self.detector = SlowNodeDetector(
             path=self.filepath,
-            sensors=self.sensors_dir,
+            sensors=self.sensors_file,
             num_nodes=2,
             pct=0.05,
             spn=self.spn,
