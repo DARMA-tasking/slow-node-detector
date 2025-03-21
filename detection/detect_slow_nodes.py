@@ -33,7 +33,7 @@ class SlowNodeDetector:
     """
 
     def __init__(
-            self, path, sensors, num_nodes, pct, spn, rpn, plot_rank_breakdowns, use_clstr):
+            self, path, sensors, num_nodes, pct, spn, rpn, plot_rank_breakdowns, use_clstr, output_dir=None):
         # Create empty dicts for storing data
         self.__rank_times = {}
         self.__rank_breakdowns = {}
@@ -61,9 +61,12 @@ class SlowNodeDetector:
         self.__slow_iterations = {}
 
         # Initialize (and create) directories
-        self.__output_dir = os.path.join(
-            os.path.dirname(path),
-            "output")
+        if output_dir:
+            self.__output_dir = os.path.abspath(output_dir)
+        else:
+            self.__output_dir = os.path.join(
+                os.path.dirname(path),
+                "output")
         self.__plots_dir = os.path.join(
             self.__output_dir,
             "plots")
@@ -759,6 +762,7 @@ def main():
     """
     parser = argparse.ArgumentParser(description='Slow Rank Detector script.')
     parser.add_argument('-f', '--filepath', help='Absolute or relative path to the output file from running slow_node executable', required=True)
+    parser.add_argument('-o', '--output_dir', help='Absolute or relative path to the output directory', default=None)
     parser.add_argument('-s', '--sensors', help='Absolute or relative path to the sensors.log file', default=None)
     parser.add_argument('-N', '--num_nodes', help='The number of nodes required by the application', default=None)
     parser.add_argument('-t', '--threshold', help='Percentage above average time that indicates a "slow" rank', default=0.05)
@@ -779,7 +783,8 @@ def main():
         spn=args.spn,
         rpn=args.rpn,
         plot_rank_breakdowns=args.plot_all_ranks,
-        use_clstr=args.use_clustering)
+        use_clstr=args.use_clustering,
+        output_dir=args.output_dir)
 
     slowNodeDetector.detect()
     slowNodeDetector.createHostfile()
