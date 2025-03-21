@@ -400,49 +400,46 @@ class SlowNodeDetector:
                         f"{slowest_non_representative_center:.2f}s"
                     )
                     print()
-
-            node_to_ranks = {}
-            for rank, node in self.__rank_to_node_map.items():
-                if node not in node_to_ranks:
-                    node_to_ranks[node] = []
-                node_to_ranks[node].append(rank)
-
-            # write clustering results to file
-            with open(os.path.join(self.__output_dir, f"clustering_results.txt"), 'w') as file:
-                for cluster in sorted(np.unique(np.array(clusters))):
-                    representative_label = '(representative)' if cluster == representative_cluster else ''
-                    outlier_label = '(outlier)' if cluster_centers[cluster] > threshold else ''
-                    file.write(
-                        f"* Cluster {cluster} {representative_label} {outlier_label}:\n"
-                    )
-
-                    # Print ranks in cluster, grouped by nodes
-                    for node, ranks in node_to_ranks.items():
-                        ranks_from_node_that_are_in_cluster = [rank for rank in ranks if rank in cluster_to_ranks[cluster]]
-                        if ranks_from_node_that_are_in_cluster:
-                            max_rank_str_len = max([len(str(rank)) for rank in ranks_from_node_that_are_in_cluster])
-                            for i, rank in enumerate(ranks_from_node_that_are_in_cluster):
-                                # Print first rank with node ...
-                                if i == 0:
-                                    file.write(f"  rank {rank: <{max_rank_str_len}} |- {node} ({len(ranks_from_node_that_are_in_cluster)})\n")
-                                # ... then print other ranks grouped under the same node (don't print node again)
-                                else:
-                                    file.write(f"  rank {rank: <{max_rank_str_len}} |\n")
-                            file.write("\n") # complete node grouping
-
-            self.__printClusteringResults(clusters, cluster_to_ranks, cluster_centers, representative_cluster, threshold)
-            self.__plotClusteringResults(data, clusters, cluster_centers, threshold, representative_cluster)
-
-            outliers = []
-            for cluster, times in cluster_to_times.items():
-                if cluster in problematic_clusters:
-                    outliers.extend(times)
-            diffs = [t / representative_center for t in outliers]
-
         else:
             print("1 cluster found: no outliers detected.")
-            outliers = []
-            diffs = []
+
+        node_to_ranks = {}
+        for rank, node in self.__rank_to_node_map.items():
+            if node not in node_to_ranks:
+                node_to_ranks[node] = []
+            node_to_ranks[node].append(rank)
+
+        # write clustering results to file
+        with open(os.path.join(self.__output_dir, f"clustering_results.txt"), 'w') as file:
+            for cluster in sorted(np.unique(np.array(clusters))):
+                representative_label = '(representative)' if cluster == representative_cluster else ''
+                outlier_label = '(outlier)' if cluster_centers[cluster] > threshold else ''
+                file.write(
+                    f"* Cluster {cluster} {representative_label} {outlier_label}:\n"
+                )
+
+                # Print ranks in cluster, grouped by nodes
+                for node, ranks in node_to_ranks.items():
+                    ranks_from_node_that_are_in_cluster = [rank for rank in ranks if rank in cluster_to_ranks[cluster]]
+                    if ranks_from_node_that_are_in_cluster:
+                        max_rank_str_len = max([len(str(rank)) for rank in ranks_from_node_that_are_in_cluster])
+                        for i, rank in enumerate(ranks_from_node_that_are_in_cluster):
+                            # Print first rank with node ...
+                            if i == 0:
+                                file.write(f"  rank {rank: <{max_rank_str_len}} |- {node} ({len(ranks_from_node_that_are_in_cluster)})\n")
+                            # ... then print other ranks grouped under the same node (don't print node again)
+                            else:
+                                file.write(f"  rank {rank: <{max_rank_str_len}} |\n")
+                        file.write("\n") # complete node grouping
+
+        self.__printClusteringResults(clusters, cluster_to_ranks, cluster_centers, representative_cluster, threshold)
+        self.__plotClusteringResults(data, clusters, cluster_centers, threshold, representative_cluster)
+
+        outliers = []
+        for cluster, times in cluster_to_times.items():
+            if cluster in problematic_clusters:
+                outliers.extend(times)
+        diffs = [t / representative_center for t in outliers]
 
         return outliers, diffs
 
