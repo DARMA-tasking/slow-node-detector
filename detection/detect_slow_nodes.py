@@ -421,7 +421,7 @@ class SlowNodeDetector:
                             for i, rank in enumerate(ranks_from_node_that_are_in_cluster):
                                 # Print first rank with node ...
                                 if i == 0:
-                                    file.write(f"  rank {rank: <{max_rank_str_len}} |- {node}\n")
+                                    file.write(f"  rank {rank: <{max_rank_str_len}} |- {node} ({len(ranks_from_node_that_are_in_cluster)})\n")
                                 # ... then print other ranks grouped under the same node (don't print node again)
                                 else:
                                     file.write(f"  rank {rank: <{max_rank_str_len}} |\n")
@@ -484,12 +484,16 @@ class SlowNodeDetector:
             center_label = f"(center: {cluster_centers[cluster]:.2f})"
             print(f" * Cluster {cluster} {representative_label}{outlier_label} {center_label} contains:")
             cluster_nodes = []
+            node_to_ranks_in_cluster_map = {}
             for rank, node in self.__rank_to_node_map.items():
                 if rank in cluster_to_ranks[cluster]:
                     cluster_nodes.append(node)
+                    if node not in node_to_ranks_in_cluster_map:
+                        node_to_ranks_in_cluster_map[node] = []
+                    node_to_ranks_in_cluster_map[node].append(rank)
             cluster_nodes = np.unique(np.array(cluster_nodes))
             for node in cluster_nodes:
-                print(f"   | node {node}")
+                print(f"   | node {node} ({len(node_to_ranks_in_cluster_map[node])})")
             print()
 
     def __findHighOutliers(self, data):
