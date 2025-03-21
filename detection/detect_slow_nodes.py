@@ -372,68 +372,74 @@ class SlowNodeDetector:
         threshold,              \
         problematic_clusters = self.__clusterTimes(data)
 
-        ## warnings if representative cluster is actually the slowest
-        # identify if representative cluster has slowest center
-        representative_cluster_is_slowest = True
-        slowest_non_representative_center = 0.
-        fastest_non_representative_center = np.inf
-        for cluster_center in {k: v for k, v in cluster_centers.items() if k != representative_cluster}.values():
-            if cluster_center > representative_center:
-                representative_cluster_is_slowest = False
-            if cluster_center > slowest_non_representative_center:
-                slowest_non_representative_center = cluster_center
-            if cluster_center < fastest_non_representative_center:
-                fastest_non_representative_center = cluster_center
+        if len(np.unique(np.array(clusters))) > 1:
+            ## warnings if representative cluster is actually the slowest
+            # identify if representative cluster has slowest center
+            representative_cluster_is_slowest = True
+            slowest_non_representative_center = 0.
+            fastest_non_representative_center = np.inf
+            for cluster_center in {k: v for k, v in cluster_centers.items() if k != representative_cluster}.values():
+                if cluster_center > representative_center:
+                    representative_cluster_is_slowest = False
+                if cluster_center > slowest_non_representative_center:
+                    slowest_non_representative_center = cluster_center
+                if cluster_center < fastest_non_representative_center:
+                    fastest_non_representative_center = cluster_center
 
-        # if representative cluster is slowest, check by how much
-        if representative_cluster_is_slowest:
-            if representative_center - 3 * np.std(cluster_to_times[representative_cluster]) > slowest_non_representative_center:
-                print()
-                print(f"     WARNING: Clustering results found most times to be slower than others. No outliers will be detected.")
-                print(
-                    f"              Most times are centered around {representative_center:.2f}, "
-                    f"but other ranks ran in {fastest_non_representative_center:.2f}-"
-                    f"{slowest_non_representative_center:.2f}s"
-                )
-                print()
+            # if representative cluster is slowest, check by how much
+            if representative_cluster_is_slowest:
+                if representative_center - 3 * np.std(cluster_to_times[representative_cluster]) > slowest_non_representative_center:
+                    print()
+                    print(f"     WARNING: Clustering results found most times to be slower than others. No outliers will be detected.")
+                    print(
+                        f"              Most times are centered around {representative_center:.2f}, "
+                        f"but other ranks ran in {fastest_non_representative_center:.2f}-"
+                        f"{slowest_non_representative_center:.2f}s"
+                    )
+                    print()
 
-        node_to_ranks = {}
-        for rank, node in self.__rank_to_node_map.items():
-            if node not in node_to_ranks:
-                node_to_ranks[node] = []
-            node_to_ranks[node].append(rank)
+            node_to_ranks = {}
+            for rank, node in self.__rank_to_node_map.items():
+                if node not in node_to_ranks:
+                    node_to_ranks[node] = []
+                node_to_ranks[node].append(rank)
 
-        # write clustering results to file
-        with open(os.path.join(self.__output_dir, f"clustering_results.txt"), 'w') as file:
-            for cluster in sorted(np.unique(np.array(clusters))):
-                representative_label = '(representative)' if cluster == representative_cluster else ''
-                outlier_label = '(outlier)' if cluster_centers[cluster] > threshold else ''
-                file.write(
-                    f"* Cluster {cluster} {representative_label} {outlier_label}:\n"
-                )
+            # write clustering results to file
+            with open(os.path.join(self.__output_dir, f"clustering_results.txt"), 'w') as file:
+                for cluster in sorted(np.unique(np.array(clusters))):
+                    representative_label = '(representative)' if cluster == representative_cluster else ''
+                    outlier_label = '(outlier)' if cluster_centers[cluster] > threshold else ''
+                    file.write(
+                        f"* Cluster {cluster} {representative_label} {outlier_label}:\n"
+                    )
 
-                # Print ranks in cluster, grouped by nodes
-                for node, ranks in node_to_ranks.items():
-                    ranks_from_node_that_are_in_cluster = [rank for rank in ranks if rank in cluster_to_ranks[cluster]]
-                    if ranks_from_node_that_are_in_cluster:
-                        max_rank_str_len = max([len(str(rank)) for rank in ranks_from_node_that_are_in_cluster])
-                        for i, rank in enumerate(ranks_from_node_that_are_in_cluster):
-                            # Print first rank with node ...
-                            if i == 0:
-                                file.write(f"  rank {rank: <{max_rank_str_len}} |- {node}\n")
-                            # ... then print other ranks grouped under the same node (don't print node again)
-                            else:
-                                file.write(f"  rank {rank: <{max_rank_str_len}} |\n")
-                        file.write("\n") # complete node grouping
+                    # Print ranks in cluster, grouped by nodes
+                    for node, ranks in node_to_ranks.items():
+                        ranks_from_node_that_are_in_cluster = [rank for rank in ranks if rank in cluster_to_ranks[cluster]]
+                        if ranks_from_node_that_are_in_cluster:
+                            max_rank_str_len = max([len(str(rank)) for rank in ranks_from_node_that_are_in_cluster])
+                            for i, rank in enumerate(ranks_from_node_that_are_in_cluster):
+                                # Print first rank with node ...
+                                if i == 0:
+                                    file.write(f"  rank {rank: <{max_rank_str_len}} |- {node}\n")
+                                # ... then print other ranks grouped under the same node (don't print node again)
+                                else:
+                                    file.write(f"  rank {rank: <{max_rank_str_len}} |\n")
+                            file.write("\n") # complete node grouping
 
-        self.__printClusteringResults(clusters, cluster_to_ranks, cluster_centers, representative_cluster, threshold)
-        self.__plotClusteringResults(data, clusters, cluster_centers, threshold, representative_cluster)
+            self.__printClusteringResults(clusters, cluster_to_ranks, cluster_centers, representative_cluster, threshold)
+            self.__plotClusteringResults(data, clusters, cluster_centers, threshold, representative_cluster)
 
-        outliers = []
-        for cluster, times in cluster_to_times.items():
-            if cluster in problematic_clusters:
-                outliers.extend(times)
-        diffs = [t / representative_center for t in outliers]
+            outliers = []
+            for cluster, times in cluster_to_times.items():
+                if cluster in problematic_clusters:
+                    outliers.extend(times)
+            diffs = [t / representative_center for t in outliers]
+
+        else:
+            print("1 cluster found: no outliers detected.")
+            outliers = []
+            diffs = []
 
         return outliers, diffs
 
