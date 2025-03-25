@@ -72,7 +72,7 @@ class TestClusteringOutliers(unittest.TestCase):
             62,1412
         ])
         self.expected_slow_nodes = set([
-            'node446', 'node442' #, 'node378', 'node257'
+            'node446', 'node442'
         ])
         self.expected_overheated_nodes = set()
 
@@ -93,13 +93,10 @@ class TestClusteringOutliers(unittest.TestCase):
 
     def test_slow_ranks(self):
         slow_ranks = self.detector.getSlowRanks()
-        print(slow_ranks)
         self.assertSetEqual(slow_ranks, self.expected_slow_ranks)
 
     def test_slow_nodes(self):
         slow_nodes = self.detector.getSlowNodes()
-        print(slow_nodes)
-        print(self.expected_slow_nodes)
         self.assertSetEqual(slow_nodes, self.expected_slow_nodes)
 
     def test_overheated_nodes(self):
@@ -140,13 +137,10 @@ class TestClusteringNoOutliers(unittest.TestCase):
 
     def test_slow_ranks(self):
         slow_ranks = self.detector.getSlowRanks()
-        print(slow_ranks)
         self.assertSetEqual(slow_ranks, self.expected_slow_ranks)
 
     def test_slow_nodes(self):
         slow_nodes = self.detector.getSlowNodes()
-        print(slow_nodes)
-        print(self.expected_slow_nodes)
         self.assertSetEqual(slow_nodes, self.expected_slow_nodes)
 
     def test_overheated_nodes(self):

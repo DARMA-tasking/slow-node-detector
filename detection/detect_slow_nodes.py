@@ -24,6 +24,17 @@ class SlowNodeDetector:
             Optional: Use `-N` argument to specify the number of nodes that should be
             included in the hostfile.
 
+    Outliers can be detected in two ways:
+
+        clustering: If `use_clstr = True`, the SlowNodeDetector will form clusters
+            of ranks with similar execution times. Ranks belonging to slow or outlying
+            clusters will be flagged as "slow."
+
+        percent difference: The SlowNodeDetector compares the execution time of each
+            rank to the average execution of all of the ranks. If the difference in times
+            is greater than some threshold percentage (given by `pct`), the rank is flagged
+            as "slow."
+
     The following terminology will be used through the SlowNodeDetector:
 
         Rank: An MPI process
@@ -203,7 +214,7 @@ class SlowNodeDetector:
         plt.savefig(save_path)
         plt.close()
 
-    def __plotClusteringResults(self, times, clusters, cluster_centers, threshold, representative_cluster):
+    def __plotClusteringResults(self, times, clusters, cluster_centers, representative_cluster, threshold):
         """
         Create and save histograms of times for each cluster with cluster centers and thresholds.
 
@@ -361,9 +372,67 @@ class SlowNodeDetector:
         # return sorted(nodes, key=lambda n: self.__getNumberOfSlowRanksOnNode(n))
         return sorted(node_times, key=lambda t: node_times[t])
 
+    def __clusterTimes(self, data):
+        print(f"Beginning clustering for {len(data)} rank total times...")
+        from sklearn.cluster import MeanShift
+
+        data = np.array(data)
+
+        ms = MeanShift().fit(data.reshape(-1, 1))
+        clusters = ms.predict(data.reshape(-1, 1))
+
+
+        cluster_to_times = {}
+        cluster_to_ranks = {}
+
+        for rank, (time, cluster) in enumerate(zip(data, clusters)):
+            if cluster not in cluster_to_times:
+                cluster_to_times[cluster] = []
+                cluster_to_ranks[cluster] = []
+            cluster_to_times[cluster].append(time)
+            cluster_to_ranks[cluster].append(rank)
+
+        cluster_centers = dict(zip(sorted(cluster_to_times.keys()), list(ms.cluster_centers_.reshape(1, -1)[0])))
+
+        representative_cluster = max(cluster_to_times.items(), key=lambda v: len(v[1]))[0]
+        representative_center = cluster_centers[representative_cluster]
+        threshold = representative_center + 3 * np.std(cluster_to_times[representative_cluster])
+
+        problematic_clusters = [cluster_id for cluster_id, center in cluster_centers.items() if center > threshold]
+        return data,clusters,cluster_to_times,cluster_to_ranks,cluster_centers,representative_cluster,representative_center,threshold,problematic_clusters
+
+    def __printClusteringResults(self, clusters, cluster_to_ranks, cluster_centers, representative_cluster, threshold):
+        print("-- Rank total times clustering results --")
+        print()
+        print(f"Found {len(np.unique(np.array(clusters)))} clusters.")
+        print(f"Representative cluster: {representative_cluster}")
+        print()
+        for cluster in sorted(np.unique(np.array(clusters))):
+            representative_label = '(representative)' if cluster == representative_cluster else ''
+            outlier_label = '(outlier)' if cluster_centers[cluster] > threshold else ''
+            center_label = f"(center: {cluster_centers[cluster]:.2f})"
+            print(f" * Cluster {cluster} {representative_label}{outlier_label} {center_label} contains:")
+            cluster_nodes = []
+            node_to_ranks_in_cluster_map = {}
+            for rank, node in self.__rank_to_node_map.items():
+                if rank in cluster_to_ranks[cluster]:
+                    cluster_nodes.append(node)
+                    if node not in node_to_ranks_in_cluster_map:
+                        node_to_ranks_in_cluster_map[node] = []
+                    node_to_ranks_in_cluster_map[node].append(rank)
+            cluster_nodes = np.unique(np.array(cluster_nodes))
+            for node in cluster_nodes:
+                print(f"   | node {node} ({len(node_to_ranks_in_cluster_map[node])})")
+            print()
+
+
+    ###########################################################################
+    ## Outlier detection functions
+
     def __findClusterOutliers(self, data):
         """
-        Finds rank outliers by their total execution times.
+        Uses clustering to identify outliers
+        (Currently specialized for rank execution time).
         """
         data,                   \
         clusters,               \
@@ -376,7 +445,6 @@ class SlowNodeDetector:
         problematic_clusters = self.__clusterTimes(data)
 
         if len(np.unique(np.array(clusters))) > 1:
-            ## warnings if representative cluster is actually the slowest
             # identify if representative cluster has slowest center
             representative_cluster_is_slowest = True
             slowest_non_representative_center = 0.
@@ -433,7 +501,7 @@ class SlowNodeDetector:
                         file.write("\n") # complete node grouping
 
         self.__printClusteringResults(clusters, cluster_to_ranks, cluster_centers, representative_cluster, threshold)
-        self.__plotClusteringResults(data, clusters, cluster_centers, threshold, representative_cluster)
+        self.__plotClusteringResults(data, clusters, cluster_centers, representative_cluster, threshold)
 
         outliers = []
         for cluster, times in cluster_to_times.items():
@@ -443,60 +511,7 @@ class SlowNodeDetector:
 
         return outliers, diffs
 
-    def __clusterTimes(self, data):
-        print(f"Beginning clustering for {len(data)} rank total times...")
-        from sklearn.cluster import MeanShift
-
-        data = np.array(data)
-
-        ms = MeanShift().fit(data.reshape(-1, 1))
-        clusters = ms.predict(data.reshape(-1, 1))
-
-
-        cluster_to_times = {}
-        cluster_to_ranks = {}
-
-        for rank, (time, cluster) in enumerate(zip(data, clusters)):
-            if cluster not in cluster_to_times:
-                cluster_to_times[cluster] = []
-                cluster_to_ranks[cluster] = []
-            cluster_to_times[cluster].append(time)
-            cluster_to_ranks[cluster].append(rank)
-
-        cluster_centers = dict(zip(sorted(cluster_to_times.keys()), list(ms.cluster_centers_.reshape(1, -1)[0])))
-
-        representative_cluster = max(cluster_to_times.items(), key=lambda v: len(v[1]))[0]
-        representative_center = cluster_centers[representative_cluster]
-        threshold = representative_center + 3 * np.std(cluster_to_times[representative_cluster])
-
-        problematic_clusters = [cluster_id for cluster_id, center in cluster_centers.items() if center > threshold]
-        return data,clusters,cluster_to_times,cluster_to_ranks,cluster_centers,representative_cluster,representative_center,threshold,problematic_clusters
-
-    def __printClusteringResults(self, clusters, cluster_to_ranks, cluster_centers, representative_cluster, threshold):
-        print("-- Rank total times clustering results --")
-        print()
-        print(f"Found {len(np.unique(np.array(clusters)))} clusters.")
-        print(f"Representative cluster: {representative_cluster}")
-        print()
-        for cluster in sorted(np.unique(np.array(clusters))):
-            representative_label = '(representative)' if cluster == representative_cluster else ''
-            outlier_label = '(outlier)' if cluster_centers[cluster] > threshold else ''
-            center_label = f"(center: {cluster_centers[cluster]:.2f})"
-            print(f" * Cluster {cluster} {representative_label}{outlier_label} {center_label} contains:")
-            cluster_nodes = []
-            node_to_ranks_in_cluster_map = {}
-            for rank, node in self.__rank_to_node_map.items():
-                if rank in cluster_to_ranks[cluster]:
-                    cluster_nodes.append(node)
-                    if node not in node_to_ranks_in_cluster_map:
-                        node_to_ranks_in_cluster_map[node] = []
-                    node_to_ranks_in_cluster_map[node].append(rank)
-            cluster_nodes = np.unique(np.array(cluster_nodes))
-            for node in cluster_nodes:
-                print(f"   | node {node} ({len(node_to_ranks_in_cluster_map[node])})")
-            print()
-
-    def __findHighOutliers(self, data):
+    def __findPercentOutliers(self, data):
         """
         Finds data points that are some percentage (given by self.__threshold_pct)
         higher than the mean of the data.
@@ -508,6 +523,19 @@ class SlowNodeDetector:
         assert len(outliers) == len(diffs) # sanity check
         return outliers, diffs
 
+    def __findHighOutliers(self, data, force_pct=False):
+        """"
+        Dispatches to the correct outlier detection method.
+        """
+        if not self.__use_clustering or force_pct:
+            return self.__findPercentOutliers(data)
+        else:
+            if len(data) < 90:
+                print()
+                print(f"/!\\ WARNING: Clustering selected but only {len(data)} times are available; ≳100 is recommended to obtain good clustering results")
+                print()
+            return self.__findClusterOutliers(data)
+
 
     ###########################################################################
     ## Primary analytical functions
@@ -518,17 +546,9 @@ class SlowNodeDetector:
         find any slow (self.__threshold_pct slower than the mean) ranks.
         """
         rank_ids, total_times = zip(*self.__rank_times.items())
-        if self.__use_clustering:
-            if len(total_times) < 90:
-                print()
-                print(f"/!\\ WARNING: Clustering selected but only {len(total_times)} times are available; ≳100 is recommended to obtain good clustering results")
-                print()
-            outliers, slowdowns = self.__findClusterOutliers(total_times)
-        else:
-            outliers, slowdowns = self.__findHighOutliers(total_times)
+        outliers, slowdowns = self.__findHighOutliers(total_times)
 
         self.__plotRankTimes(rank_ids, total_times, outliers)
-
         self.__plotData(rank_ids, total_times, "Across-Rank Comparison", "Rank ID", outliers)
 
         for r_id, time in self.__rank_times.items():
@@ -547,7 +567,7 @@ class SlowNodeDetector:
         find any slow (self.__threshold_pct slower than the mean) iterations.
         """
         for rank_id, breakdown in self.__rank_breakdowns.items():
-            outliers, _ = self.__findHighOutliers(breakdown)
+            outliers, _ = self.__findHighOutliers(breakdown, force_pct=True) # use pct analysis for now
             n_iterations = len(breakdown)
             iters = list(range(n_iterations))
 
@@ -571,7 +591,7 @@ class SlowNodeDetector:
         self.__parseSensors()
         for n_id, node_data in self.__node_temps.items():
             for s_id, socket_data in node_data.items():
-                outliers, diffs = self.__findHighOutliers(list(socket_data.values()))
+                outliers, diffs = self.__findHighOutliers(list(socket_data.values()), force_pct=True) # use pct analysis for now
                 i = 0
                 for c_id, core_temp in socket_data.items():
                     if core_temp in outliers:
@@ -749,8 +769,6 @@ class SlowNodeDetector:
         s = self.__s(good_node_names)
         print(f"hostfile with {len(good_node_names)} node{s} has been written to {hostfile_path}\n")
 
-def getFilepath(path: str):
-    return path if os.path.isabs(path) else os.path.join(os.getcwd(), path)
 
 def main():
     """
@@ -769,8 +787,8 @@ def main():
     parser.add_argument('-c', '--use_clustering', action='store_true', help='Use clustering outlier detection')
     args = parser.parse_args()
 
-    filepath = getFilepath(args.filepath)
-    sensors_filepath = getFilepath(args.sensors) if args.sensors is not None else None
+    filepath = os.path.abspath(args.filepath)
+    sensors_filepath = os.path.abspath(args.sensors) if args.sensors is not None else None
 
     slowNodeDetector = SlowNodeDetector(
         path=filepath,
