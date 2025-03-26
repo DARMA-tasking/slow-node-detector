@@ -1,8 +1,19 @@
 import os
 import re
+import time
 import argparse
 import numpy as np
+from typing import Callable, Any
 import matplotlib.pyplot as plt
+
+
+def time_ftn(ftn: Callable[..., Any], *args, **kwargs) -> None:
+    start = time.time()
+    ftn(*args, **kwargs)
+    end = time.time()
+    dur = end - start
+    print(f"{ftn.__name__}() ran for {dur:.2f} seconds.")
+
 
 class SlowNodeDetector:
     """
@@ -338,11 +349,11 @@ class SlowNodeDetector:
         Plots are generated in the same directory as the output
         file.
         """
-        self.__parseOutput()
-        self.__analyzeAcrossRanks()
-        self.__analyzeWithinRanks()
+        time_ftn(self.__parseOutput)
+        time_ftn(self.__analyzeAcrossRanks)
+        time_ftn(self.__analyzeWithinRanks)
         if self.__temperature_analysis_available:
-            self.__analyzeTemperatures()
+            time_ftn(self.__analyzeTemperatures)
 
         # Gather results
         rank_ids, total_times = zip(*self.__rank_times.items())
@@ -352,11 +363,16 @@ class SlowNodeDetector:
         rank_with_slowest_iteration = -1
         slowest_iteration = -1
         slowest_time = -np.inf
+        all_ranks_slowest_iters = {}
         if len(ranks_with_outlying_iterations) > 0:
-            for r_id, (iter, t) in self.__slow_iterations.items():
-                slowest_time = max(slowest_time, t)
-                if t == slowest_time:
-                    slowest_iteration = iter
+            for r_id, slow_iters in self.__slow_iterations.items():
+                slowest_iter_on_this_rank = max(slow_iters, key=lambda x: x[1])
+                slowest_iter_id = slowest_iter_on_this_rank[0]
+                slowest_iter_t = slowest_iter_on_this_rank[1]
+                all_ranks_slowest_iters[r_id] = slowest_iter_t
+                slowest_time = max(slowest_time, slowest_iter_t)
+                if slowest_iter_t == slowest_time:
+                    slowest_iteration = slowest_iter_id
                     rank_with_slowest_iteration = r_id
         else:
             for r_id, breakdown in self.__rank_breakdowns.items():
@@ -364,6 +380,8 @@ class SlowNodeDetector:
                 if slowest_time in breakdown:
                     slowest_iteration = np.argmax(breakdown)
                     rank_with_slowest_iteration = r_id
+        if len(all_ranks_slowest_iters) > 0:
+            all_ranks_slowest_iters = dict(sorted(all_ranks_slowest_iters.items(), reverse=True, key=lambda item: item[1]))
 
         # Print results
         if print_results:
@@ -414,7 +432,14 @@ class SlowNodeDetector:
             s = self.__s(ranks_with_outlying_iterations)
             print("Intra-Rank Analysis")
             print()
-            print(f"    {len(ranks_with_outlying_iterations)} Rank{s} With Outlying Iterations: {ranks_with_outlying_iterations}")
+            print(f"    {len(ranks_with_outlying_iterations)} Rank{s} With Outlying Iterations.")
+            if len(ranks_with_outlying_iterations) > 100:
+                print(f"\n        100 Slowest Iterations:")
+            for i, (r_id, iter_t) in enumerate(all_ranks_slowest_iters.items()):
+                if i == 100:
+                    break
+                print(f"        {iter_t} (Rank {r_id}, Node {self.__rank_to_node_map[r_id]})")
+            print()
             print(f"    Slowest Iteration: {slowest_iteration} on Rank {rank_with_slowest_iteration} ({self.__rank_to_node_map[rank_with_slowest_iteration]}) - {slowest_time}s")
             print()
 
@@ -500,8 +525,8 @@ def main():
         rpn=args.rpn,
         plot_rank_breakdowns=args.plot_all_ranks)
 
-    slowNodeDetector.detect()
-    slowNodeDetector.createHostfile()
+    time_ftn(slowNodeDetector.detect)
+    time_ftn(slowNodeDetector.createHostfile)
 
 if __name__ == "__main__":
-    main()
+    time_ftn(main)

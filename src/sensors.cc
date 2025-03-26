@@ -239,6 +239,12 @@ void runSensorsAndReduceOutput(const std::string& proc_name) {
     std::vector<int> recv_counts(num_nodes);
     int local_size = max_temps.size();
     MPI_Gather(&local_size, 1, MPI_INT, recv_counts.data(), 1, MPI_INT, output_rank_in_leader_comm, leader_comm);
+
+    // Then determine how many cores/temps are present on each node
+    std::vector<int> all_num_values(num_nodes);
+    MPI_Gather(&num_values, 1, MPI_INT, all_num_values.data(), 1, MPI_INT, output_rank_in_leader_comm, leader_comm);
+
+    // Then gather all of the data vectors
     std::vector<int> displs(num_nodes, 0);
     int total_size = 0;
     if (on_output_rank) {
@@ -247,12 +253,6 @@ void runSensorsAndReduceOutput(const std::string& proc_name) {
             total_size += recv_counts[i];
         }
     }
-
-    // Then determine how many cores/temps are present on each node
-    std::vector<int> all_num_values(num_nodes);
-    MPI_Gather(&num_values, 1, MPI_INT, all_num_values.data(), 1, MPI_INT, output_rank_in_leader_comm, leader_comm);
-
-    // Then gather all of the data vectors
     std::vector<double> all_max_temps(total_size);
     std::vector<int> all_socket_orders(total_size);
     std::vector<int> all_core_orders(total_size);

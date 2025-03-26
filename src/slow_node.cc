@@ -58,8 +58,10 @@ int main(int argc, char** argv) {
   int name_len;
   MPI_Get_processor_name(processor_name, &name_len);
 
+  MPI_Barrier(MPI_COMM_WORLD);
   auto const& [iter_timings, total_time] = runBenchmark();
   sensors::runSensorsAndReduceOutput(processor_name);
+  MPI_Barrier(MPI_COMM_WORLD);
 
   std::vector<double> all_times;
   all_times.resize(num_ranks);
@@ -100,7 +102,7 @@ int main(int argc, char** argv) {
         << std::string(&all_processor_names[cur_rank * MPI_MAX_PROCESSOR_NAME])
         << "): " << time << ": breakdown: ";
       for (int i = cur; i < iters + cur; i++) {
-        std::cout << all_iter_times[cur] << " ";
+        std::cout << all_iter_times[i] << " ";
       }
       std::cout << std::endl;
       cur += iters;
