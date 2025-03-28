@@ -7,6 +7,7 @@
 #include <functional>
 
 #include "sensors.h"
+#include "freq.h"
 
 namespace sensors {
 
@@ -132,9 +133,12 @@ void writeSensorData(
   std::vector<int>& all_core_orders,
   std::vector<int>& all_num_values,
   std::vector<int>& all_node_ids,
-  std::map<int, std::string>& node_map
+  std::vector<int>& all_cpu_freqs,
+  std::map<int, std::string>& node_map,
+  std::string identifier
 ) {
-  std::filesystem::path reduced_filename = "sensors.log";
+  if (identifier != "") identifier = "_" + identifier;
+  std::filesystem::path reduced_filename = "sensors" + identifier + ".log";
   std::ofstream reduced_file(reduced_filename);
   if (!reduced_file) {
     std::cerr << "Error: Unable to open " << reduced_filename << " for writing.\n";
@@ -164,7 +168,7 @@ void writeSensorData(
   std::cout << "Wrote sensor data to " << reduced_filename << std::endl;
 }
 
-void runSensorsAndReduceOutput(const std::string& proc_name) {
+void runSensorsAndReduceOutput(const std::string& proc_name, std::string identifier) {
   // Determine the global rank
   int global_rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &global_rank);
@@ -185,7 +189,7 @@ void runSensorsAndReduceOutput(const std::string& proc_name) {
   }
 
   // Get the CPU frequency for every core on this node
-  auto local_freqs = readCPUFrequencies();
+  auto local_freqs = ::freq::readCPUFrequencies();
   bool has_freqs = !local_freqs.empty();
 
   // Flatten the parsed data into a vector for MPI_Reduce
@@ -295,7 +299,8 @@ void runSensorsAndReduceOutput(const std::string& proc_name) {
                 all_cpu_freqs.data(), recv_counts.data(), freq_displs.data(), MPI_INT,
                 output_rank_in_leader_comm, leader_comm);
 
-    MPI_Comm_free(&leader_comm);
+    // Sanity check
+    assert(all_max_temps.size() == all_cpu_freqs.size());
 
     /*
     * output_rank now holds three vectors:
@@ -304,7 +309,8 @@ void runSensorsAndReduceOutput(const std::string& proc_name) {
     *    all_core_orders - a vector containing all of the IDs from core_order vectors, IN ORDER
     *    all_cpu_freqs - a vector containing all of the CPU frequencies, kind of in order
 
-    * output_rank can then iterate through the all_max_temps vector, matching with the socket and core from the order vectors
+    * output_rank can then iterate through the temperature and frequency vectors,
+    * matching with the socket and core from the order vectors
     */
 
     if (on_output_rank) {
@@ -313,11 +319,19 @@ void runSensorsAndReduceOutput(const std::string& proc_name) {
       for (int i = 0; i < num_nodes; ++i) {
         node_map[all_node_ids[i]] = std::string(all_names.data() + node_name_displs[i], name_lengths[i]);
       }
-      writeSensorData(all_max_temps, all_socket_orders, all_core_orders, all_num_values, all_node_ids, node_map);
+      writeSensorData(
+        all_max_temps,
+        all_socket_orders,
+        all_core_orders,
+        all_num_values,
+        all_node_ids,
+        all_cpu_freqs,
+        node_map,
+        identifier);
     }
   }
+  MPI_Comm_free(&leader_comm);
   MPI_Comm_free(&node_comm);
-  MPI_Barrier(MPI_COMM_WORLD);
 }
 
 } // namespace sensors

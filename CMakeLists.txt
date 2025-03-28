@@ -14,6 +14,7 @@ add_executable(
   ${SLOW_NODE_EXE}
   "${CMAKE_SOURCE_DIR}/src/slow_node.cc"
   "${CMAKE_SOURCE_DIR}/src/sensors.cc"
+  "${CMAKE_SOURCE_DIR}/src/freq.cc"
 )
 
 target_link_libraries(${SLOW_NODE_EXE} PUBLIC MPI::MPI_CXX)

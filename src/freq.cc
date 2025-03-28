@@ -7,7 +7,7 @@
 
 namespace freq {
 
-std::vector<int> readCPUFrequencies(const std::string& proc_name) {
+std::vector<int> readCPUFrequencies() {
     std::vector<int> freqs;
     FILE* pipe = popen("cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq", "r");
     if (!pipe) {

@@ -6,7 +6,7 @@
 
 namespace freq {
 
-std::vector<int> readCPUFrequencies(const std::string& proc_name);
+std::vector<int> readCPUFrequencies();
 
 } // namespace freq
 

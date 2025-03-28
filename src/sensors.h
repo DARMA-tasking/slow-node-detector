@@ -22,13 +22,20 @@ void getTempsAndOrdering(
 );
 
 void writeSensorData(
-  std::vector<double>& max_temps,
-  std::vector<std::pair<int,int>>& ordering,
-  const std::string& proc_name
+  std::vector<double>& all_max_temps,
+  std::vector<int>& all_socket_orders,
+  std::vector<int>& all_core_orders,
+  std::vector<int>& all_num_values,
+  std::vector<int>& all_node_ids,
+  std::vector<int>& all_cpu_freqs,
+  std::map<int, std::string>& node_map,
+  std::string identifier
 );
 
 // Main function
-void runSensorsAndReduceOutput(const std::string& proc_name);
+void runSensorsAndReduceOutput(
+  const std::string& proc_name,
+  std::string identifier = "");
 
 } // namespace sensors
 
