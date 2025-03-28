@@ -28,10 +28,11 @@ std::tuple<std::vector<double>, double> runBenchmark() {
     Kokkos::Timer timer;
     KokkosBlas::gemm("N", "N", 1.0, A, B, 0.0, C);
     Kokkos::fence();
-    double time = timer.seconds();
-    total_time += time;
+    // Do not count the first iteration
     if (i > 0) {
-      iter_timings.push_back(time); // do not save the first iteration
+      double time = timer.seconds();
+      total_time += time;
+      iter_timings.push_back(time);
     }
   }
 
