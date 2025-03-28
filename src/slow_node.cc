@@ -22,13 +22,17 @@ std::tuple<std::vector<double>, double> runBenchmark() {
 
   double total_time = 0.0;
 
+  MPI_Barrier(MPI_COMM_WORLD);
+
   for (int i = 0; i < iters; i++) {
     Kokkos::Timer timer;
     KokkosBlas::gemm("N", "N", 1.0, A, B, 0.0, C);
     Kokkos::fence();
     double time = timer.seconds();
     total_time += time;
-    iter_timings.push_back(time);
+    if (i > 0) {
+      iter_timings.push_back(time); // do not save the first iteration
+    }
   }
 
   int rank = -1;
@@ -41,7 +45,7 @@ std::tuple<std::vector<double>, double> runBenchmark() {
 
 int main(int argc, char** argv) {
   if (argc > 1) {
-    iters = atoi(argv[1]);
+    iters = atoi(argv[1]) + 1; // add one iteration since we will drop the first one
     M = N = K = atoi(argv[2]);
   }
   std::cout << "iters: " << iters << ", M=N=K=" << M << std::endl;
@@ -58,10 +62,8 @@ int main(int argc, char** argv) {
   int name_len;
   MPI_Get_processor_name(processor_name, &name_len);
 
-  MPI_Barrier(MPI_COMM_WORLD);
   auto const& [iter_timings, total_time] = runBenchmark();
   sensors::runSensorsAndReduceOutput(processor_name);
-  MPI_Barrier(MPI_COMM_WORLD);
 
   std::vector<double> all_times;
   all_times.resize(num_ranks);

@@ -184,15 +184,20 @@ class SlowNodeDetector:
         with open(self.__sensors_output_file, 'r') as sensor_data:
             for line in sensor_data:
                 if line.startswith("Node"):
-                    node_name = line.split(":")[-1].strip()
-                    if node_name not in self.__node_temps:
-                        self.__node_temps = {node_name: {}}
-                elif line.startswith("Socket"):
-                    pattern = r"Socket id (\d+), Core (\d+): (\d+)(?:°C| C)"
-                    socket_str, core_str, temp_str = self.__matchRegex(pattern, line)
+                    pattern = r"Node (\d+), Socket (\d+), Core (\d+): (\d+)(?:°C| C), (\d+) KHz"
+
+                    node_name,  \
+                    socket_str, \
+                    core_str,   \
+                    temp_str,   \
+                    freq_str = self.__matchRegex(pattern, line)
+
                     socket_id = int(socket_str)
                     core_id = int(core_str)
                     temp = float(temp_str)
+                    freq = int(freq_str)
+                    if node_name not in self.__node_temps:
+                        self.__node_temps = {node_name: {}}
                     if socket_id not in self.__node_temps[node_name]:
                         self.__node_temps[node_name][socket_id] = {}
                     self.__node_temps[node_name][socket_id][core_id] = temp

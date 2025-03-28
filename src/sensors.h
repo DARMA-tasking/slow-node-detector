@@ -1,5 +1,5 @@
-#ifndef SRC_SENSORS_HPP
-#define SRC_SENSORS_HPP
+#ifndef SRC_SENSORS_H
+#define SRC_SENSORS_H
 
 #include <map>
 #include <vector>
@@ -32,4 +32,4 @@ void runSensorsAndReduceOutput(const std::string& proc_name);
 
 } // namespace sensors
 
-#endif // SRC_SENSORS_HPP
+#endif // SRC_SENSORS_H
