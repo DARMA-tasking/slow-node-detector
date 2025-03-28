@@ -374,7 +374,7 @@ class SlowNodeDetector:
                 slowest_iter_on_this_rank = max(slow_iters, key=lambda x: x[1])
                 slowest_iter_id = slowest_iter_on_this_rank[0]
                 slowest_iter_t = slowest_iter_on_this_rank[1]
-                all_ranks_slowest_iters[r_id] = slowest_iter_t
+                all_ranks_slowest_iters[r_id] = (slowest_iter_id, slowest_iter_t)
                 slowest_time = max(slowest_time, slowest_iter_t)
                 if slowest_iter_t == slowest_time:
                     slowest_iteration = slowest_iter_id
@@ -440,10 +440,10 @@ class SlowNodeDetector:
             print(f"    {len(ranks_with_outlying_iterations)} Rank{s} With Outlying Iterations.")
             if len(ranks_with_outlying_iterations) > 100:
                 print(f"\n        100 Slowest Iterations:")
-            for i, (r_id, iter_t) in enumerate(all_ranks_slowest_iters.items()):
+            for i, (r_id, (iter_id, iter_t)) in enumerate(all_ranks_slowest_iters.items()):
                 if i == 100:
                     break
-                print(f"        {iter_t} (Rank {r_id}, Node {self.__rank_to_node_map[r_id]})")
+                print(f"        {iter_t} (Iter {iter_id} on Rank {r_id}, Node {self.__rank_to_node_map[r_id]})")
             print()
             print(f"    Slowest Iteration: {slowest_iteration} on Rank {rank_with_slowest_iteration} ({self.__rank_to_node_map[rank_with_slowest_iteration]}) - {slowest_time}s")
             print()
