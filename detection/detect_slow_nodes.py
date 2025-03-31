@@ -449,7 +449,7 @@ class SlowNodeDetector:
             for i, (r_id, (iter_id, iter_t)) in enumerate(all_ranks_slowest_iters.items()):
                 if i == 100:
                     break
-                print(f"        {iter_t} (Iter {iter_id} on Rank {r_id}, Node {self.__rank_to_node_map[r_id]})")
+                print(f"        {iter_t} s (Iter {iter_id} on Rank {r_id}, Node {self.__rank_to_node_map[r_id]})")
             print()
             print(f"    Slowest Iteration: {slowest_iteration} on Rank {rank_with_slowest_iteration} ({self.__rank_to_node_map[rank_with_slowest_iteration]}) - {slowest_time}s")
             print()
