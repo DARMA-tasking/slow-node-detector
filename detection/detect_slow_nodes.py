@@ -49,6 +49,7 @@ class SlowNodeDetector:
         self.__rank_breakdowns = {}
         self.__rank_to_node_map = {} # Maps each rank to the name of its corresponding node
         self.__node_temps = {}
+        self.__node_freqs = {}
         self.__overheated_nodes = {}
 
         # Initialize variables
@@ -184,7 +185,7 @@ class SlowNodeDetector:
         with open(self.__sensors_output_file, 'r') as sensor_data:
             for line in sensor_data:
                 if line.startswith("Node"):
-                    pattern = r"Node (\d+), Socket (\d+), Core (\d+): (\d+)(?:°C| C), (\d+) KHz"
+                    pattern = r"Node (\w+), Socket (\d+), Core (\d+): (\d+)(?:°C| C), (\d+) KHz"
 
                     node_name,  \
                     socket_str, \
@@ -196,11 +197,15 @@ class SlowNodeDetector:
                     core_id = int(core_str)
                     temp = float(temp_str)
                     freq = int(freq_str)
+
                     if node_name not in self.__node_temps:
                         self.__node_temps = {node_name: {}}
+                        self.__node_freqs = {node_name: {}}
                     if socket_id not in self.__node_temps[node_name]:
                         self.__node_temps[node_name][socket_id] = {}
+                        self.__node_freqs[node_name][socket_id] = {}
                     self.__node_temps[node_name][socket_id][core_id] = temp
+                    self.__node_freqs[node_name][socket_id][core_id] = freq
 
 
     ###########################################################################
@@ -427,7 +432,8 @@ class SlowNodeDetector:
                         for c_id, c_data in s_data.items():
                             diff = c_data["diff"]
                             temp = c_data["temperature"]
-                            core_temp_outputs.append(f"        Core {c_id}: {temp} C ({diff:.0%} hotter than mean on this socket) - {n_id} (socket {s_id})")
+                            freq = self.__node_freqs[n_id][s_id][c_id]
+                            core_temp_outputs.append(f"        Core {c_id}: {temp} C ({diff:.0%} hotter than mean on this socket) - {n_id} (socket {s_id}); Frequency {freq} KHz")
                 s = self.__s(core_temp_outputs)
                 print(f"    Found {len(core_temp_outputs)} over-heated cores")
                 for core_temp_output in core_temp_outputs:
@@ -510,7 +516,7 @@ def main():
     """
     parser = argparse.ArgumentParser(description='Slow Rank Detector script.')
     parser.add_argument('-f', '--filepath', help='Absolute or relative path to the output file from running slow_node executable', required=True)
-    parser.add_argument('-s', '--sensors', help='Absolute or relative path to the sensors.log file', default=None)
+    parser.add_argument('-s', '--sensors', help='Absolute or relative path to the sensors file that will be analyzed', default=None)
     parser.add_argument('-N', '--num_nodes', help='The number of nodes required by the application', default=None)
     parser.add_argument('-t', '--threshold', help='Percentage above average time that indicates a "slow" rank', default=0.05)
     parser.add_argument('-spn', '--spn', help='Number of sockets per node', default=2)
