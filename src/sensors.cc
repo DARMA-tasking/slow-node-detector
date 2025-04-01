@@ -148,21 +148,22 @@ void writeSensorAndFreqData(
   // Use the ordering vectors to map back to socket and core IDs.
   int iter = 0;
   std::string node_name = node_map[all_node_ids[iter]];
-  int num_entries_on_this_node;
+  int num_entries_on_this_node = all_num_values[iter];
   for (size_t i = 0; i < all_max_temps.size(); i++) {
-    num_entries_on_this_node = all_num_values[iter];
+    // Update the node name as needed
+    if (iter == 0 && i == 0) { /*pass*/ }
+    else if (i % num_entries_on_this_node == 0) {
+      iter++;
+      node_name = node_map[all_node_ids[iter]];
+      num_entries_on_this_node = all_num_values[iter];
+    }
+
     reduced_file << "Node " << node_name
                  << ", Socket " << all_socket_orders[i]
                  << ", Core "    << all_core_orders[i]
                  << ": "         << all_max_temps[i] << " C"
                  << ", "         << all_cpu_freqs[i] << " KHz\n";
 
-    // Update the node name if we've reached the number
-    // of entries on that node
-    if (i + 1 % num_entries_on_this_node == 0) {
-      iter++;
-      node_name = node_map[all_node_ids[iter]];
-    }
   }
   reduced_file.close();
   std::cout << "Wrote sensor data to " << reduced_filename << std::endl;
