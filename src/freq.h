@@ -6,7 +6,7 @@
 
 namespace freq {
 
-std::vector<int> readCPUFrequencies();
+int readCPUFrequency();
 
 } // namespace freq
 
