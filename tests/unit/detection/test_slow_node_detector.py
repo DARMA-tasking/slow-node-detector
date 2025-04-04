@@ -31,7 +31,8 @@ class TestNoClustering(unittest.TestCase):
             spn=self.spn,
             rpn=self.rpn,
             plot_rank_breakdowns=False,
-            use_clstr=False
+            use_clstr=False,
+            use_unfrm=False
         )
 
         # Run detection
@@ -85,7 +86,8 @@ class TestClusteringOutliers(unittest.TestCase):
             spn=self.spn,
             rpn=self.rpn,
             plot_rank_breakdowns=False,
-            use_clstr=True
+            use_clstr=True,
+            use_unfrm=False
         )
 
         # Run detection
@@ -129,7 +131,8 @@ class TestClusteringNoOutliers(unittest.TestCase):
             spn=self.spn,
             rpn=self.rpn,
             plot_rank_breakdowns=False,
-            use_clstr=True
+            use_clstr=True,
+            use_unfrm=False
         )
 
         # Run detection

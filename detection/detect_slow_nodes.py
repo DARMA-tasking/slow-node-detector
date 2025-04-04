@@ -44,7 +44,7 @@ class SlowNodeDetector:
     """
 
     def __init__(
-            self, path, sensors, num_nodes, pct, spn, rpn, plot_rank_breakdowns, use_clstr, output_dir=None):
+            self, path, sensors, num_nodes, pct, spn, rpn, plot_rank_breakdowns, use_clstr, use_unfrm, output_dir=None):
         # Create empty dicts for storing data
         self.__rank_times = {}
         self.__rank_breakdowns = {}
@@ -64,12 +64,14 @@ class SlowNodeDetector:
         self.__plot_rank_breakdowns = plot_rank_breakdowns
         self.__num_ranks = 0
         self.__use_clustering = use_clstr
+        self.__use_uniformity = use_unfrm
 
         # Initialize outliers
         self.__slow_ranks = {}
         self.__slow_rank_slowdowns = {}
         self.__slow_node_names = []
         self.__slow_iterations = {}
+        self.__node_variances = {}
 
         # Initialize (and create) directories
         if output_dir:
@@ -378,7 +380,7 @@ class SlowNodeDetector:
 
         data = np.array(data)
 
-        ms = MeanShift().fit(data.reshape(-1, 1))
+        ms = MeanShift(n_jobs=-1).fit(data.reshape(-1, 1))
         clusters = ms.predict(data.reshape(-1, 1))
 
 
@@ -560,6 +562,18 @@ class SlowNodeDetector:
             node_name = self.__rank_to_node_map[r_id]
             if self.__isSlowNode(node_name) and node_name not in self.__slow_node_names:
                 self.__slow_node_names.append(node_name)
+
+        if self.__use_uniformity:
+            node_variances = {}
+            for r_id, time in self.__rank_times.items():
+                node_name = self.__rank_to_node_map[r_id]
+                if node_name not in node_variances:
+                    node_variances[node_name] = []
+                node_variances[node_name].append(time)
+
+            for node_name, times in node_variances.items():
+                variance = np.var(times)
+                self.__node_variances[node_name] = variance
 
     def __analyzeWithinRanks(self):
         """
@@ -752,14 +766,23 @@ class SlowNodeDetector:
             elif num_good_nodes > self.__num_nodes:
                 n_nodes_to_drop = num_good_nodes - self.__num_nodes
                 assert n_nodes_to_drop > 0, f"Cannot drop {n_nodes_to_drop}"
-                sorted_nodes = self.__sortNodesByExecutionTime(good_node_names)
                 print(
                     f"Since the SlowNodeDetector originally found {num_good_nodes} good node{s}, "
                     f"but only {self.__num_nodes} are needed, the following nodes will also be "
                     f"omitted from the hostfile:")
-                for node in sorted_nodes[-n_nodes_to_drop:]:
-                    print(f"    {node} ({self.__getNumberOfSlowRanksOnNode(node)} slow ranks)")
-                good_node_names = sorted_nodes[:-n_nodes_to_drop]
+
+                if self.__use_uniformity:
+                    node_variances = {node: self.__node_variances[node] for node in good_node_names}
+                    sorted_nodes_by_variance = sorted(node_variances.items(), key=lambda item: item[1], reverse=True)
+                    nodes_to_drop = [node for node, _ in sorted_nodes_by_variance[:n_nodes_to_drop]]
+                    for node in nodes_to_drop:
+                        print(f"    {node} ({self.__getNumberOfSlowRanksOnNode(node)} slow ranks)")
+                    good_node_names -= set(nodes_to_drop)
+                else:
+                    sorted_nodes = self.__sortNodesByExecutionTime(good_node_names)
+                    for node in sorted_nodes[-n_nodes_to_drop:]:
+                        print(f"    {node} ({self.__getNumberOfSlowRanksOnNode(node)} slow ranks)")
+                    good_node_names = sorted_nodes[:-n_nodes_to_drop]
 
         hostfile_path = os.path.join(self.__output_dir, "hostfile.txt")
         with open(hostfile_path, "w") as hostfile:
@@ -785,6 +808,7 @@ def main():
     parser.add_argument('-rpn', '--rpn', help='Number of ranks per node', default=48)
     parser.add_argument('-p', '--plot_all_ranks', action='store_true', help='Plot the breakdowns for every rank')
     parser.add_argument('-c', '--use_clustering', action='store_true', help='Use clustering outlier detection')
+    parser.add_argument('-u', '--use_uniformity', action='store_true', help='Use rank execution time uniformity to identify slow nodes')
     args = parser.parse_args()
 
     filepath = os.path.abspath(args.filepath)
@@ -799,6 +823,7 @@ def main():
         rpn=args.rpn,
         plot_rank_breakdowns=args.plot_all_ranks,
         use_clstr=args.use_clustering,
+        use_unfrm=args.use_uniformity,
         output_dir=args.output_dir)
 
     slowNodeDetector.detect()
