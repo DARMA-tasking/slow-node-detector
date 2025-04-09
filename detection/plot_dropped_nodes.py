@@ -17,10 +17,6 @@ there is no need to call this script explicitly.
 """
 
 def main():
-    """
-    See documentation of SlowNodeDetector class, as well as
-    the detect() and createHostfile() methods, for more information.
-    """
     parser = argparse.ArgumentParser(description='Slow Rank Detector script.')
     parser.add_argument('-s', '--slownode', help='Absolute or relative path to the output from slow_node executable', required=True)
     parser.add_argument('-a', '--analysis', help='Absolute or relative path to the output from detect_slow_nodes', required=True)
