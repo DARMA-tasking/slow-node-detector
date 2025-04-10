@@ -65,6 +65,7 @@ class SlowNodeDetector:
         self.__num_ranks = 0
         self.__use_clustering = use_clstr
         self.__use_uniformity = use_unfrm
+        self.__parallel_clustering = parallel_clustering
 
         # Initialize outliers
         self.__slow_ranks = {}
@@ -380,7 +381,7 @@ class SlowNodeDetector:
 
         data = np.array(data)
 
-        ms = MeanShift(n_jobs=-1).fit(data.reshape(-1, 1))
+        ms = MeanShift(n_jobs= -1 if self.__parallel_clustering else None).fit(data.reshape(-1, 1))
         clusters = ms.predict(data.reshape(-1, 1))
 
 
@@ -824,7 +825,8 @@ def main():
         plot_rank_breakdowns=args.plot_all_ranks,
         use_clstr=args.use_clustering,
         use_unfrm=args.use_uniformity,
-        output_dir=args.output_dir)
+        output_dir=args.output_dir,
+        parallel_clustering=True)
 
     slowNodeDetector.detect()
     slowNodeDetector.createHostfile()
