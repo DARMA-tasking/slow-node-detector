@@ -3,6 +3,22 @@ import re
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
+
+class ClusteringResults:
+    """
+    A class to hold data related to clustering results
+    """
+    def __init__(self, data, clusters, cluster_to_times, cluster_to_ranks, cluster_centers, representative_cluster, representative_center, threshold, problematic_clusters):
+        self.data = data
+        self.clusters = clusters
+        self.cluster_to_times = cluster_to_times
+        self.cluster_to_ranks = cluster_to_ranks
+        self.cluster_centers = cluster_centers
+        self.representative_cluster = representative_cluster
+        self.representative_center = representative_center
+        self.threshold = threshold
+        self.problematic_clusters = problematic_clusters
 
 class SlowNodeDetector:
     """
@@ -23,6 +39,17 @@ class SlowNodeDetector:
             Optional: Use `-N` argument to specify the number of nodes that should be
             included in the hostfile.
 
+    Outliers can be detected in two ways:
+
+        clustering: If `use_clstr = True`, the SlowNodeDetector will form clusters
+            of ranks with similar execution times. Ranks belonging to slow or outlying
+            clusters will be flagged as "slow."
+
+        percent difference: The SlowNodeDetector compares the execution time of each
+            rank to the average execution of all of the ranks. If the difference in times
+            is greater than some threshold percentage (given by `pct`), the rank is flagged
+            as "slow."
+
     The following terminology will be used through the SlowNodeDetector:
 
         Rank: An MPI process
@@ -32,7 +59,7 @@ class SlowNodeDetector:
     """
 
     def __init__(
-            self, path, sensors, num_nodes, pct, spn, rpn, plot_rank_breakdowns):
+            self, path, sensors, num_nodes, pct, spn, rpn, plot_rank_breakdowns, use_clstr, use_unfrm, output_dir=None, parallel_clustering=False):
         # Create empty dicts for storing data
         self.__rank_times = {}
         self.__rank_breakdowns = {}
@@ -51,17 +78,25 @@ class SlowNodeDetector:
         self.__temperature_analysis_available = True if self.__sensors_output_file is not None else False
         self.__plot_rank_breakdowns = plot_rank_breakdowns
         self.__num_ranks = 0
+        self.__use_clustering = use_clstr
+        self.__use_uniformity = use_unfrm
+        self.__parallel_clustering = parallel_clustering
+        self.__std_dev_factor_outlier_threshold =  3.
 
         # Initialize outliers
         self.__slow_ranks = {}
         self.__slow_rank_slowdowns = {}
         self.__slow_node_names = []
         self.__slow_iterations = {}
+        self.__node_variances = {}
 
         # Initialize (and create) directories
-        self.__output_dir = os.path.join(
-            os.path.dirname(path),
-            "output")
+        if output_dir:
+            self.__output_dir = os.path.abspath(output_dir)
+        else:
+            self.__output_dir = os.path.join(
+                os.path.dirname(path),
+                "output")
         self.__plots_dir = os.path.join(
             self.__output_dir,
             "plots")
@@ -81,6 +116,43 @@ class SlowNodeDetector:
         if match:
             return tuple(match.groups())
         raise RuntimeError(f"regex matching failed on line {line}")
+
+    def __freedmanDiaconisBins(self, data):
+        """
+        Calculate the number of bins for a histogram using the Freedman-Diaconis rule.
+
+        Parameters:
+        ----------
+        data : array-like
+            Numerical data points.
+
+        Returns:
+        -------
+        int
+            The number of bins (at least 1).
+
+        Raises:
+        ------
+        ValueError
+            If the input data is empty.
+        """
+        if len(data) == 0:
+            raise ValueError("Data cannot be empty.")
+
+        if len(np.unique(data)) == 1:
+            return 1  # Only one bin is needed if all values are the same
+
+        q25, q75 = np.percentile(data, [25, 75])
+        iqr = q75 - q25
+
+        if iqr == 0:
+            return 1  # Only one bin is needed if IQR is zero
+
+        bin_width = 1 * iqr * len(data) ** (-1/3)
+        bins = int((data.max() - data.min()) / bin_width)
+
+        # Ensure bins is at least 1
+        return max(bins, 1)
 
     def __plotData(self, x_data, y_data, title, xlabel, highlights=[]):
         """
@@ -125,6 +197,96 @@ class SlowNodeDetector:
         plt.savefig(save_path)
         plt.close()
 
+    def __plotRankTimes(self, rank_ids, total_times, outliers):
+        """
+        Create and save a scatter plot of total times per rank, colored by node.
+
+        Parameters:
+        ----------
+        rank_ids : array-like
+            The ranks corresponding to the total times.
+
+        total_times : array-like
+            The total times associated with each rank.
+
+        outliers : set
+            A set of outlier times to be marked differently in the plot.
+
+        Returns:
+        -------
+        None
+            The function saves the plot as a PNG file in the specified directory.
+        """
+        nodes = self.__rank_to_node_map.values()
+        markers = ['X' if outlier else 'o' for outlier in [time in outliers for time in total_times]]
+
+        plt.figure(figsize=(16,9))
+        sns.scatterplot(x=rank_ids, y=total_times, hue=nodes, palette='tab20', s=70, style=markers)
+        plt.legend(title='Node')
+
+        # Set plot title and labels
+        plt.title('Scatter Plot of Time per Rank Colored by Node')
+        plt.xlabel('Rank')
+        plt.ylabel('Time')
+
+        save_path = os.path.join(self.__plots_dir, f"rank_times.png")
+        plt.savefig(save_path)
+        plt.close()
+
+    def __plotClusteringResults(self, times, clusters, cluster_centers, representative_cluster, threshold):
+        """
+        Create and save histograms of times for each cluster with cluster centers and thresholds.
+
+        Parameters:
+        ----------
+        times : array-like
+            The time data points to be clustered.
+
+        clusters : array-like
+            The cluster assignments for each time point.
+
+        cluster_centers : dict
+            A dictionary mapping each cluster to its center value.
+
+        threshold : float
+            The threshold value for identifying outliers.
+
+        representative_cluster : int
+            The cluster ID of the representative cluster.
+
+        Returns:
+        -------
+        None
+            The function saves the plot as a PNG file in the specified directory.
+        """
+        unique_clusters = np.unique(np.array(clusters))
+        plt.figure(figsize=(16,9))
+        colors = plt.cm.Dark2(np.linspace(0, 1, len(unique_clusters)))
+
+        for i, cluster in enumerate(unique_clusters):
+            cluster_times = np.array([times[i] for i in range(len(times)) if clusters[i] == cluster])
+            representative_label = '(representative)' if cluster == representative_cluster else ''
+            outlier_label = '(outlier)' if cluster_centers[cluster] > threshold else ''
+            plt.hist(
+                cluster_times,
+                bins=self.__freedmanDiaconisBins(cluster_times),
+                alpha=0.8,
+                label=f'Cluster {cluster} {representative_label}{outlier_label}', color=colors[i]
+            )
+            plt.axvline(cluster_centers[cluster], label=f"Cluster {cluster} center", c=colors[cluster], linestyle=':')
+
+        plt.axvline(threshold, label=f"Threshold", c='Red', linestyle='--')
+        plt.axvline(np.array(times).mean(), label=f"Average of all times", c='Orange', linestyle='--')
+
+        plt.xlabel('Time')
+        plt.ylabel('Counts')
+        plt.title('Histogram of Times Colored by Cluster: Meanshift results')
+        plt.grid()
+        plt.legend()
+
+        save_path = os.path.join(self.__plots_dir, f"clustering_results.png")
+        plt.savefig(save_path)
+        plt.close()
 
     ###########################################################################
     ## Parsing
@@ -229,7 +391,148 @@ class SlowNodeDetector:
         # return sorted(nodes, key=lambda n: self.__getNumberOfSlowRanksOnNode(n))
         return sorted(node_times, key=lambda t: node_times[t])
 
-    def __findHighOutliers(self, data):
+    def __clusterTimes(self, data):
+        print(f"Beginning clustering for {len(data)} rank total times...")
+        from sklearn.cluster import MeanShift
+
+        data = np.array(data)
+
+        ms = MeanShift(n_jobs= -1 if self.__parallel_clustering else None).fit(data.reshape(-1, 1))
+        clusters = ms.predict(data.reshape(-1, 1))
+
+
+        cluster_to_times = {}
+        cluster_to_ranks = {}
+
+        for rank, (time, cluster) in enumerate(zip(data, clusters)):
+            if cluster not in cluster_to_times:
+                cluster_to_times[cluster] = []
+                cluster_to_ranks[cluster] = []
+            cluster_to_times[cluster].append(time)
+            cluster_to_ranks[cluster].append(rank)
+
+        cluster_centers = dict(zip(sorted(cluster_to_times.keys()), list(ms.cluster_centers_.reshape(1, -1)[0])))
+
+        representative_cluster = max(cluster_to_times.items(), key=lambda v: len(v[1]))[0]
+        representative_center = cluster_centers[representative_cluster]
+        threshold = representative_center + self.__std_dev_factor_outlier_threshold * np.std(cluster_to_times[representative_cluster])
+
+        problematic_clusters = [cluster_id for cluster_id, center in cluster_centers.items() if center > threshold]
+        return ClusteringResults(
+            data,
+            clusters,
+            cluster_to_times,
+            cluster_to_ranks,
+            cluster_centers,
+            representative_cluster,
+            representative_center,
+            threshold,
+            problematic_clusters
+        )
+
+    def __printClusteringResults(self, clusters, cluster_to_ranks, cluster_centers, representative_cluster, threshold):
+        print("-- Rank total times clustering results --")
+        print()
+        print(f"Found {len(np.unique(np.array(clusters)))} clusters.")
+        print(f"Representative cluster: {representative_cluster}")
+        print()
+        for cluster in sorted(np.unique(np.array(clusters))):
+            representative_label = '(representative)' if cluster == representative_cluster else ''
+            outlier_label = '(outlier)' if cluster_centers[cluster] > threshold else ''
+            center_label = f"(center: {cluster_centers[cluster]:.2f})"
+            print(f" * Cluster {cluster} {representative_label}{outlier_label} {center_label} contains:")
+            cluster_nodes = []
+            node_to_ranks_in_cluster_map = {}
+            for rank, node in self.__rank_to_node_map.items():
+                if rank in cluster_to_ranks[cluster]:
+                    cluster_nodes.append(node)
+                    if node not in node_to_ranks_in_cluster_map:
+                        node_to_ranks_in_cluster_map[node] = []
+                    node_to_ranks_in_cluster_map[node].append(rank)
+            cluster_nodes = np.unique(np.array(cluster_nodes))
+            for node in cluster_nodes:
+                print(f"   | node {node} ({len(node_to_ranks_in_cluster_map[node])})")
+            print()
+
+
+    ###########################################################################
+    ## Outlier detection functions
+
+    def __findClusterOutliers(self, data):
+        """
+        Uses clustering to identify outliers
+        (Currently specialized for rank execution time).
+        """
+        results = self.__clusterTimes(data)
+
+        if len(np.unique(np.array(results.clusters))) > 1:
+            # identify if representative cluster has slowest center
+            representative_cluster_is_slowest = True
+            slowest_non_representative_center = 0.
+            fastest_non_representative_center = np.inf
+            for cluster_center in {k: v for k, v in results.cluster_centers.items() if k != results.representative_cluster}.values():
+                if cluster_center > results.representative_center:
+                    representative_cluster_is_slowest = False
+                if cluster_center > slowest_non_representative_center:
+                    slowest_non_representative_center = cluster_center
+                if cluster_center < fastest_non_representative_center:
+                    fastest_non_representative_center = cluster_center
+
+            # if representative cluster is slowest, check by how much
+            if representative_cluster_is_slowest:
+                if results.representative_center - self.__std_dev_factor_outlier_threshold * np.std(results.cluster_to_times[results.representative_cluster]) > slowest_non_representative_center:
+                    print()
+                    print(f"     WARNING: Clustering results found most times to be slower than others. No outliers will be detected.")
+                    print(
+                        f"              Most times are centered around {results.representative_center:.2f}, "
+                        f"but other ranks ran in {fastest_non_representative_center:.2f}-"
+                        f"{slowest_non_representative_center:.2f}s"
+                    )
+                    print()
+        else:
+            print("1 cluster found: no outliers detected.")
+
+        node_to_ranks = {}
+        for rank, node in self.__rank_to_node_map.items():
+            if node not in node_to_ranks:
+                node_to_ranks[node] = []
+            node_to_ranks[node].append(rank)
+
+        # write clustering results to file
+        with open(os.path.join(self.__output_dir, f"clustering_results.txt"), 'w') as file:
+            for cluster in sorted(np.unique(np.array(results.clusters))):
+                representative_label = '(representative)' if cluster == results.representative_cluster else ''
+                outlier_label = '(outlier)' if results.cluster_centers[cluster] > results.threshold else ''
+                file.write(
+                    f"* Cluster {cluster} {representative_label} {outlier_label}:\n"
+                )
+
+                # Print ranks in cluster, grouped by nodes
+                for node, ranks in node_to_ranks.items():
+                    ranks_from_node_that_are_in_cluster = [rank for rank in ranks if rank in results.cluster_to_ranks[cluster]]
+                    if ranks_from_node_that_are_in_cluster:
+                        max_rank_str_len = max([len(str(rank)) for rank in ranks_from_node_that_are_in_cluster])
+                        for i, rank in enumerate(ranks_from_node_that_are_in_cluster):
+                            # Print first rank with node ...
+                            if i == 0:
+                                file.write(f"  rank {rank: <{max_rank_str_len}} |- {node} ({len(ranks_from_node_that_are_in_cluster)})\n")
+                            # ... then print other ranks grouped under the same node (don't print node again)
+                            else:
+                                file.write(f"  rank {rank: <{max_rank_str_len}} |\n")
+                        file.write("\n") # complete node grouping
+
+        self.__printClusteringResults(results.clusters, results.cluster_to_ranks, results.cluster_centers, results.representative_cluster, results.threshold)
+        self.__plotClusteringResults(data, results.clusters, results.cluster_centers, results.representative_cluster, results.threshold)
+
+        outliers = []
+        for cluster, times in results.cluster_to_times.items():
+            if cluster in results.problematic_clusters:
+                outliers.extend(times)
+        diffs = [t / results.representative_center for t in outliers]
+
+        return outliers, diffs
+
+    def __findPercentOutliers(self, data):
         """
         Finds data points that are some percentage (given by self.__threshold_pct)
         higher than the mean of the data.
@@ -240,6 +543,19 @@ class SlowNodeDetector:
         diffs = [t / avg for t in outliers]
         assert len(outliers) == len(diffs) # sanity check
         return outliers, diffs
+
+    def __findHighOutliers(self, data, force_pct=False):
+        """"
+        Dispatches to the correct outlier detection method.
+        """
+        if not self.__use_clustering or force_pct:
+            return self.__findPercentOutliers(data)
+        else:
+            if len(data) < 90:
+                print()
+                print(f"/!\\ WARNING: Clustering selected but only {len(data)} times are available; ≳100 is recommended to obtain good clustering results")
+                print()
+            return self.__findClusterOutliers(data)
 
 
     ###########################################################################
@@ -253,6 +569,7 @@ class SlowNodeDetector:
         rank_ids, total_times = zip(*self.__rank_times.items())
         outliers, slowdowns = self.__findHighOutliers(total_times)
 
+        self.__plotRankTimes(rank_ids, total_times, outliers)
         self.__plotData(rank_ids, total_times, "Across-Rank Comparison", "Rank ID", outliers)
 
         for r_id, time in self.__rank_times.items():
@@ -265,13 +582,25 @@ class SlowNodeDetector:
             if self.__isSlowNode(node_name) and node_name not in self.__slow_node_names:
                 self.__slow_node_names.append(node_name)
 
+        if self.__use_uniformity:
+            node_variances = {}
+            for r_id, time in self.__rank_times.items():
+                node_name = self.__rank_to_node_map[r_id]
+                if node_name not in node_variances:
+                    node_variances[node_name] = []
+                node_variances[node_name].append(time)
+
+            for node_name, times in node_variances.items():
+                variance = np.var(times)
+                self.__node_variances[node_name] = variance
+
     def __analyzeWithinRanks(self):
         """
         Compares the execution of each iteration on a single rank to
         find any slow (self.__threshold_pct slower than the mean) iterations.
         """
         for rank_id, breakdown in self.__rank_breakdowns.items():
-            outliers, _ = self.__findHighOutliers(breakdown)
+            outliers, _ = self.__findHighOutliers(breakdown, force_pct=True) # use pct analysis for now
             n_iterations = len(breakdown)
             iters = list(range(n_iterations))
 
@@ -295,7 +624,7 @@ class SlowNodeDetector:
         self.__parseSensors()
         for n_id, node_data in self.__node_temps.items():
             for s_id, socket_data in node_data.items():
-                outliers, diffs = self.__findHighOutliers(list(socket_data.values()))
+                outliers, diffs = self.__findHighOutliers(list(socket_data.values()), force_pct=True) # use pct analysis for now
                 i = 0
                 for c_id, core_temp in socket_data.items():
                     if core_temp in outliers:
@@ -313,17 +642,17 @@ class SlowNodeDetector:
     ###########################################################################
     ## Public getters
 
-    def getSlowRanks(self) -> dict:
-        """Return map of slow rank IDs to their times."""
-        return self.__slow_ranks
+    def getSlowRanks(self) -> set:
+        """Return set of slow rank IDs"""
+        return set(self.__slow_ranks.keys())
 
-    def getSlowNodes(self) -> list:
-        """Return list of slow node names."""
-        return self.__slow_node_names
+    def getSlowNodes(self) -> set:
+        """Return set of slow node names."""
+        return set(self.__slow_node_names)
 
-    def getOverheatedNodes(self) -> dict:
+    def getOverheatedNodes(self) -> set:
         """Return map of slow node names to the sockets and cores on each node."""
-        return self.__overheated_nodes
+        return set(self.__overheated_nodes.keys())
 
 
     ###########################################################################
@@ -369,10 +698,13 @@ class SlowNodeDetector:
         if print_results:
             s = self.__s(slow_rank_ids)
             n = len(str(abs(int(self.__num_ranks))))
+            mean_method_label = f"(at least {self.__threshold_pct:.0%} slower than the mean)"
+            clustering_method_label = f"(part of a cluster at least 3 standard deviations above representative cluster)"
+            method_label = clustering_method_label if self.__use_clustering else mean_method_label
             print("\n----------------------------------------------------------")
             print("Across-Rank Analysis")
             print()
-            print(f"    {len(slow_rank_ids)} Outlier Rank{s} (at least {self.__threshold_pct:.0%} slower than the mean): {slow_rank_ids}")
+            print(f"    {len(slow_rank_ids)} Outlier Rank{s} {method_label}: {slow_rank_ids}")
             if len(slow_rank_ids) > 0:
                 print()
                 print(f"    Slowdown % (Relative to Average) and Node for Slow Rank{s}:")
@@ -453,14 +785,23 @@ class SlowNodeDetector:
             elif num_good_nodes > self.__num_nodes:
                 n_nodes_to_drop = num_good_nodes - self.__num_nodes
                 assert n_nodes_to_drop > 0, f"Cannot drop {n_nodes_to_drop}"
-                sorted_nodes = self.__sortNodesByExecutionTime(good_node_names)
                 print(
                     f"Since the SlowNodeDetector originally found {num_good_nodes} good node{s}, "
                     f"but only {self.__num_nodes} are needed, the following nodes will also be "
                     f"omitted from the hostfile:")
-                for node in sorted_nodes[-n_nodes_to_drop:]:
-                    print(f"    {node} ({self.__getNumberOfSlowRanksOnNode(node)} slow ranks)")
-                good_node_names = sorted_nodes[:-n_nodes_to_drop]
+
+                if self.__use_uniformity:
+                    node_variances = {node: self.__node_variances[node] for node in good_node_names}
+                    sorted_nodes_by_variance = sorted(node_variances.items(), key=lambda item: item[1], reverse=True)
+                    nodes_to_drop = [node for node, _ in sorted_nodes_by_variance[:n_nodes_to_drop]]
+                    for node in nodes_to_drop:
+                        print(f"    {node} ({self.__getNumberOfSlowRanksOnNode(node)} slow ranks)")
+                    good_node_names -= set(nodes_to_drop)
+                else:
+                    sorted_nodes = self.__sortNodesByExecutionTime(good_node_names)
+                    for node in sorted_nodes[-n_nodes_to_drop:]:
+                        print(f"    {node} ({self.__getNumberOfSlowRanksOnNode(node)} slow ranks)")
+                    good_node_names = sorted_nodes[:-n_nodes_to_drop]
 
         hostfile_path = os.path.join(self.__output_dir, "hostfile.txt")
         with open(hostfile_path, "w") as hostfile:
@@ -470,8 +811,6 @@ class SlowNodeDetector:
         s = self.__s(good_node_names)
         print(f"hostfile with {len(good_node_names)} node{s} has been written to {hostfile_path}\n")
 
-def getFilepath(path: str):
-    return path if os.path.isabs(path) else os.path.join(os.getcwd(), path)
 
 def main():
     """
@@ -480,16 +819,19 @@ def main():
     """
     parser = argparse.ArgumentParser(description='Slow Rank Detector script.')
     parser.add_argument('-f', '--filepath', help='Absolute or relative path to the output file from running slow_node executable', required=True)
+    parser.add_argument('-o', '--output_dir', help='Absolute or relative path to the output directory', default=None)
     parser.add_argument('-s', '--sensors', help='Absolute or relative path to the sensors.log file', default=None)
     parser.add_argument('-N', '--num_nodes', help='The number of nodes required by the application', default=None)
     parser.add_argument('-t', '--threshold', help='Percentage above average time that indicates a "slow" rank', default=0.05)
     parser.add_argument('-spn', '--spn', help='Number of sockets per node', default=2)
     parser.add_argument('-rpn', '--rpn', help='Number of ranks per node', default=48)
     parser.add_argument('-p', '--plot_all_ranks', action='store_true', help='Plot the breakdowns for every rank')
+    parser.add_argument('-c', '--use_clustering', action='store_true', help='Use clustering outlier detection')
+    parser.add_argument('-u', '--use_uniformity', action='store_true', help='Use rank execution time uniformity to identify slow nodes')
     args = parser.parse_args()
 
-    filepath = getFilepath(args.filepath)
-    sensors_filepath = getFilepath(args.sensors) if args.sensors is not None else None
+    filepath = os.path.abspath(args.filepath)
+    sensors_filepath = os.path.abspath(args.sensors) if args.sensors is not None else None
 
     slowNodeDetector = SlowNodeDetector(
         path=filepath,
@@ -498,7 +840,11 @@ def main():
         pct=args.threshold,
         spn=args.spn,
         rpn=args.rpn,
-        plot_rank_breakdowns=args.plot_all_ranks)
+        plot_rank_breakdowns=args.plot_all_ranks,
+        use_clstr=args.use_clustering,
+        use_unfrm=args.use_uniformity,
+        output_dir=args.output_dir,
+        parallel_clustering=True)
 
     slowNodeDetector.detect()
     slowNodeDetector.createHostfile()
