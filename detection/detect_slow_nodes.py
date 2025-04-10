@@ -5,6 +5,21 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+class ClusteringResults:
+    """
+    A class to hold data related to clustering results
+    """
+    def __init__(self, data, clusters, cluster_to_times, cluster_to_ranks, cluster_centers, representative_cluster, representative_center, threshold, problematic_clusters):
+        self.data = data
+        self.clusters = clusters
+        self.cluster_to_times = cluster_to_times
+        self.cluster_to_ranks = cluster_to_ranks
+        self.cluster_centers = cluster_centers
+        self.representative_cluster = representative_cluster
+        self.representative_center = representative_center
+        self.threshold = threshold
+        self.problematic_clusters = problematic_clusters
+
 class SlowNodeDetector:
     """
     The SlowNodeDetector analyzes the output from the `slow_node` executable
@@ -44,7 +59,7 @@ class SlowNodeDetector:
     """
 
     def __init__(
-            self, path, sensors, num_nodes, pct, spn, rpn, plot_rank_breakdowns, use_clstr, use_unfrm, output_dir=None):
+            self, path, sensors, num_nodes, pct, spn, rpn, plot_rank_breakdowns, use_clstr, use_unfrm, output_dir=None, parallel_clustering=False):
         # Create empty dicts for storing data
         self.__rank_times = {}
         self.__rank_breakdowns = {}
@@ -402,7 +417,17 @@ class SlowNodeDetector:
         threshold = representative_center + 3 * np.std(cluster_to_times[representative_cluster])
 
         problematic_clusters = [cluster_id for cluster_id, center in cluster_centers.items() if center > threshold]
-        return data,clusters,cluster_to_times,cluster_to_ranks,cluster_centers,representative_cluster,representative_center,threshold,problematic_clusters
+        return ClusteringResults(
+            data,
+            clusters,
+            cluster_to_times,
+            cluster_to_ranks,
+            cluster_centers,
+            representative_cluster,
+            representative_center,
+            threshold,
+            problematic_clusters
+        )
 
     def __printClusteringResults(self, clusters, cluster_to_ranks, cluster_centers, representative_cluster, threshold):
         print("-- Rank total times clustering results --")
@@ -437,23 +462,15 @@ class SlowNodeDetector:
         Uses clustering to identify outliers
         (Currently specialized for rank execution time).
         """
-        data,                   \
-        clusters,               \
-        cluster_to_times,       \
-        cluster_to_ranks,       \
-        cluster_centers,        \
-        representative_cluster, \
-        representative_center,  \
-        threshold,              \
-        problematic_clusters = self.__clusterTimes(data)
+        results = self.__clusterTimes(data)
 
-        if len(np.unique(np.array(clusters))) > 1:
+        if len(np.unique(np.array(results.clusters))) > 1:
             # identify if representative cluster has slowest center
             representative_cluster_is_slowest = True
             slowest_non_representative_center = 0.
             fastest_non_representative_center = np.inf
-            for cluster_center in {k: v for k, v in cluster_centers.items() if k != representative_cluster}.values():
-                if cluster_center > representative_center:
+            for cluster_center in {k: v for k, v in results.cluster_centers.items() if k != results.representative_cluster}.values():
+                if cluster_center > results.representative_center:
                     representative_cluster_is_slowest = False
                 if cluster_center > slowest_non_representative_center:
                     slowest_non_representative_center = cluster_center
@@ -462,11 +479,11 @@ class SlowNodeDetector:
 
             # if representative cluster is slowest, check by how much
             if representative_cluster_is_slowest:
-                if representative_center - 3 * np.std(cluster_to_times[representative_cluster]) > slowest_non_representative_center:
+                if results.representative_center - 3 * np.std(results.cluster_to_times[results.representative_cluster]) > slowest_non_representative_center:
                     print()
                     print(f"     WARNING: Clustering results found most times to be slower than others. No outliers will be detected.")
                     print(
-                        f"              Most times are centered around {representative_center:.2f}, "
+                        f"              Most times are centered around {results.representative_center:.2f}, "
                         f"but other ranks ran in {fastest_non_representative_center:.2f}-"
                         f"{slowest_non_representative_center:.2f}s"
                     )
@@ -482,16 +499,16 @@ class SlowNodeDetector:
 
         # write clustering results to file
         with open(os.path.join(self.__output_dir, f"clustering_results.txt"), 'w') as file:
-            for cluster in sorted(np.unique(np.array(clusters))):
-                representative_label = '(representative)' if cluster == representative_cluster else ''
-                outlier_label = '(outlier)' if cluster_centers[cluster] > threshold else ''
+            for cluster in sorted(np.unique(np.array(results.clusters))):
+                representative_label = '(representative)' if cluster == results.representative_cluster else ''
+                outlier_label = '(outlier)' if results.cluster_centers[cluster] > results.threshold else ''
                 file.write(
                     f"* Cluster {cluster} {representative_label} {outlier_label}:\n"
                 )
 
                 # Print ranks in cluster, grouped by nodes
                 for node, ranks in node_to_ranks.items():
-                    ranks_from_node_that_are_in_cluster = [rank for rank in ranks if rank in cluster_to_ranks[cluster]]
+                    ranks_from_node_that_are_in_cluster = [rank for rank in ranks if rank in results.cluster_to_ranks[cluster]]
                     if ranks_from_node_that_are_in_cluster:
                         max_rank_str_len = max([len(str(rank)) for rank in ranks_from_node_that_are_in_cluster])
                         for i, rank in enumerate(ranks_from_node_that_are_in_cluster):
@@ -503,14 +520,14 @@ class SlowNodeDetector:
                                 file.write(f"  rank {rank: <{max_rank_str_len}} |\n")
                         file.write("\n") # complete node grouping
 
-        self.__printClusteringResults(clusters, cluster_to_ranks, cluster_centers, representative_cluster, threshold)
-        self.__plotClusteringResults(data, clusters, cluster_centers, representative_cluster, threshold)
+        self.__printClusteringResults(results.clusters, results.cluster_to_ranks, results.cluster_centers, results.representative_cluster, results.threshold)
+        self.__plotClusteringResults(data, results.clusters, results.cluster_centers, results.representative_cluster, results.threshold)
 
         outliers = []
-        for cluster, times in cluster_to_times.items():
-            if cluster in problematic_clusters:
+        for cluster, times in results.cluster_to_times.items():
+            if cluster in results.problematic_clusters:
                 outliers.extend(times)
-        diffs = [t / representative_center for t in outliers]
+        diffs = [t / results.representative_center for t in outliers]
 
         return outliers, diffs
 
