@@ -81,6 +81,7 @@ class SlowNodeDetector:
         self.__use_clustering = use_clstr
         self.__use_uniformity = use_unfrm
         self.__parallel_clustering = parallel_clustering
+        self.__std_dev_factor_outlier_threshold =  3.
 
         # Initialize outliers
         self.__slow_ranks = {}
@@ -414,7 +415,7 @@ class SlowNodeDetector:
 
         representative_cluster = max(cluster_to_times.items(), key=lambda v: len(v[1]))[0]
         representative_center = cluster_centers[representative_cluster]
-        threshold = representative_center + 3 * np.std(cluster_to_times[representative_cluster])
+        threshold = representative_center + self.__std_dev_factor_outlier_threshold * np.std(cluster_to_times[representative_cluster])
 
         problematic_clusters = [cluster_id for cluster_id, center in cluster_centers.items() if center > threshold]
         return ClusteringResults(
@@ -479,7 +480,7 @@ class SlowNodeDetector:
 
             # if representative cluster is slowest, check by how much
             if representative_cluster_is_slowest:
-                if results.representative_center - 3 * np.std(results.cluster_to_times[results.representative_cluster]) > slowest_non_representative_center:
+                if results.representative_center - self.__std_dev_factor_outlier_threshold * np.std(results.cluster_to_times[results.representative_cluster]) > slowest_non_representative_center:
                     print()
                     print(f"     WARNING: Clustering results found most times to be slower than others. No outliers will be detected.")
                     print(
