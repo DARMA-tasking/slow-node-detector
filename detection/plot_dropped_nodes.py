@@ -20,12 +20,12 @@ def main():
     parser = argparse.ArgumentParser(description='Slow Rank Detector script.')
     parser.add_argument('-s', '--slownode', help='Absolute or relative path to the output from slow_node executable', required=True)
     parser.add_argument('-a', '--analysis', help='Absolute or relative path to the output from detect_slow_nodes', required=True)
-    parser.add_argument('-o', '--output', help='Absolute or relative path to the output from detect_slow_nodes', default=None)
+    parser.add_argument('-o', '--output', help='Absolute or relative path to the output directory where the plot will be saved. Defaults to $(pwd)/output', default=None)
     args = parser.parse_args()
 
     slownode_filepath = os.path.abspath(args.slownode)
     analysis_filepath = os.path.abspath(args.analysis)
-    output_filepath = os.path.abspath(args.output)
+    output_filepath = os.path.abspath(args.output) if args.output is not None else os.path.join(os.getcwd(), "output")
 
     rank_times, _, rank_to_node_map = parseOutput(slownode_filepath)
     dropped_nodes = parseAnalysis(analysis_filepath)
