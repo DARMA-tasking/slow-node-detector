@@ -1,8 +1,10 @@
 
 #include "sensors.h"
 
+#include <mkl.h>
 #include <Kokkos_Random.hpp>
-#include <KokkosBlas3_gemm.hpp>
+
+#include <iostream>
 
 static int iters = 100;
 static int M = 128;
@@ -13,6 +15,10 @@ std::tuple<std::vector<double>, double> runBenchmark() {
   Kokkos::View<double**> A("A", M, N);
   Kokkos::View<double**> B("B", N, K);
   Kokkos::View<double**> C("C", M, K);
+
+  double* A_ptr = A.data();
+  double* B_ptr = B.data();
+  double* C_ptr = C.data();
 
   Kokkos::Random_XorShift64_Pool pool(123);
   Kokkos::fill_random(A, pool, 10.0);
@@ -26,7 +32,18 @@ std::tuple<std::vector<double>, double> runBenchmark() {
 
   for (int i = 0; i < iters; i++) {
     Kokkos::Timer timer;
-    KokkosBlas::gemm("N", "N", 1.0, A, B, 0.0, C);
+    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
+      M,         // number of rows in C (and A)
+      K,         // number of columns in C (and B)
+      N,         // shared inner dimension (columns of A, rows of B)
+      1.0,       // alpha
+      A_ptr,     // matrix A pointer
+      N,         // leading dimension of A (because A is M×N)
+      B_ptr,     // matrix B pointer
+      K,         // leading dimension of B (because B is N×K)
+      0.0,       // beta
+      C_ptr,     // matrix C pointer
+      K);        // leading dimension of C (because C is M×K)
     Kokkos::fence();
     // Do not count the first iteration
     if (i > 0) {
