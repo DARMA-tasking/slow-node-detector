@@ -2,9 +2,7 @@ cmake_minimum_required(VERSION 3.17 FATAL_ERROR)
 project(slow-node-detector VERSION 1.0)
 
 set(CMAKE_CXX_STANDARD 17)
-
-find_package(MPI REQUIRED)
-find_package(KokkosKernels REQUIRED)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_subdirectory(src)
 
@@ -17,5 +15,15 @@ add_executable(
   "${CMAKE_SOURCE_DIR}/src/freq.cc"
 )
 
+find_package(MPI REQUIRED)
 target_link_libraries(${SLOW_NODE_EXE} PUBLIC MPI::MPI_CXX)
-target_link_libraries(${SLOW_NODE_EXE} PUBLIC Kokkos::kokkoskernels)
+
+find_package(Trilinos)
+if (Trilinos_FOUND)
+  find_package(MKL QUIET REQUIRED)
+  target_link_libraries(${SLOW_NODE_EXE} PUBLIC MKL::MKL)
+  target_link_libraries(${SLOW_NODE_EXE} PUBLIC ${Trilinos_LIBRARIES})
+else()
+  find_package(KokkosKernels REQUIRED)
+  target_link_libraries(${SLOW_NODE_EXE} PUBLIC Kokkos::kokkoskernels)
+endif()
