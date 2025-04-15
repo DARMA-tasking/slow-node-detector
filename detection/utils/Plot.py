@@ -52,7 +52,7 @@ def plotData(x_data, y_data, title, xlabel, save_dir, threshold_pct=0.05, highli
     plt.savefig(save_path)
     plt.close()
 
-def plotNodes(x_data, y_data, y_mins, y_maxes, title, save_dir, dropped_nodes=[]):
+def plotNodes(x_data, y_data, y_mins, y_maxes, title, save_dir, dropped_nodes=[], show_all_ranges=False, hide_all_ranges=False):
     """
     Plots y_data vs. x_data and highlights outliers.
     Saves plots to the same directory as the input file.
@@ -71,6 +71,18 @@ def plotNodes(x_data, y_data, y_mins, y_maxes, title, save_dir, dropped_nodes=[]
     plt.scatter(x_data, y_data, label='Data', zorder=3, s=10)
     plt.plot(x_data, [avg] * y_size, label="Average", color="tab:green", zorder=1)
 
+    if show_all_ranges and not hide_all_ranges:
+        all_mins, all_maxes = [], []
+        for n_id in x_data:
+            idx = x_data.index(n_id)
+            n_time = y_data[idx]
+            n_min = y_mins[idx]
+            n_max = y_maxes[idx]
+            all_mins.append(n_time - n_min)
+            all_maxes.append(n_max - n_time)
+        ranges = [all_mins, all_maxes]
+        plt.errorbar(x_data, y_data, yerr=ranges, fmt='none', color='black', elinewidth=0.5, capsize=3, capthick=0.5, zorder=1)
+
     if len(dropped_nodes) > 0:
         dropped_node_times = []
         mins, maxes = [], []
@@ -84,9 +96,10 @@ def plotNodes(x_data, y_data, y_mins, y_maxes, title, save_dir, dropped_nodes=[]
             mins.append(n_time - n_min)
             maxes.append(n_max - n_time)
         s = "" if len(dropped_node_times) == 1 else "s"
-        errors = [mins, maxes]
-        plt.errorbar(dropped_nodes, dropped_node_times, yerr=errors, fmt='none', color='red', elinewidth=0.5, capsize=3, capthick=0.5, zorder=4)
         plt.scatter(dropped_nodes, dropped_node_times, label=f"Dropped Node{s}", color="r", marker="*", zorder=4)
+        errors = [mins, maxes]
+        if not hide_all_ranges:
+            plt.errorbar(dropped_nodes, dropped_node_times, yerr=errors, fmt='none', color='red', elinewidth=1.0 if show_all_ranges else 0.5, capsize=3, capthick=0.5, zorder=4)
 
     plt.title(title)
     plt.xlabel("Node ID")
@@ -100,7 +113,10 @@ def plotNodes(x_data, y_data, y_mins, y_maxes, title, save_dir, dropped_nodes=[]
     plt.savefig(save_path)
     plt.close()
 
-def plotDroppedNodes(rank_times, rank_to_node_map, dropped_nodes, output_filepath):
+def plotDroppedNodes(rank_times, rank_to_node_map, dropped_nodes, output_filepath, show_all_ranges=False, hide_all_ranges=False):
+    if hide_all_ranges:
+        show_all_ranges = False
+
     # Gather all times on this node
     all_node_data = {}
     for r_id, r_time in rank_times.items():
@@ -137,5 +153,7 @@ def plotDroppedNodes(rank_times, rank_to_node_map, dropped_nodes, output_filepat
         all_node_ydata["max"],
         "Average Time Across All Ranks on All Nodes",
         output_filepath,
-        dropped_nodes=[getNodeNumber(n_id) for n_id in dropped_nodes]
+        dropped_nodes=[getNodeNumber(n_id) for n_id in dropped_nodes],
+        show_all_ranges=show_all_ranges,
+        hide_all_ranges=hide_all_ranges
     )
