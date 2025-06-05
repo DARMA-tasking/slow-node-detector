@@ -2,7 +2,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from detection.detect_slow_nodes import SlowNodeDetector
+from detection.core.SlowNodeDetector import SlowNodeDetector
 
 class TestConfig(unittest.TestCase):
     def setUp(self):

@@ -1,8 +1,10 @@
 
 #include "sensors.h"
 
+#include <mkl.h>
 #include <Kokkos_Random.hpp>
-#include <KokkosBlas3_gemm.hpp>
+
+#include <iostream>
 
 static int iters = 100;
 static int M = 128;
@@ -14,6 +16,10 @@ std::tuple<std::vector<double>, double> runBenchmark() {
   Kokkos::View<double**> B("B", N, K);
   Kokkos::View<double**> C("C", M, K);
 
+  double* A_ptr = A.data();
+  double* B_ptr = B.data();
+  double* C_ptr = C.data();
+
   Kokkos::Random_XorShift64_Pool pool(123);
   Kokkos::fill_random(A, pool, 10.0);
   Kokkos::fill_random(B, pool, 10.0);
@@ -22,13 +28,29 @@ std::tuple<std::vector<double>, double> runBenchmark() {
 
   double total_time = 0.0;
 
+  MPI_Barrier(MPI_COMM_WORLD);
+
   for (int i = 0; i < iters; i++) {
     Kokkos::Timer timer;
-    KokkosBlas::gemm("N", "N", 1.0, A, B, 0.0, C);
+    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
+      M,         // number of rows in C (and A)
+      K,         // number of columns in C (and B)
+      N,         // shared inner dimension (columns of A, rows of B)
+      1.0,       // alpha
+      A_ptr,     // matrix A pointer
+      N,         // leading dimension of A (because A is M×N)
+      B_ptr,     // matrix B pointer
+      K,         // leading dimension of B (because B is N×K)
+      0.0,       // beta
+      C_ptr,     // matrix C pointer
+      K);        // leading dimension of C (because C is M×K)
     Kokkos::fence();
-    double time = timer.seconds();
-    total_time += time;
-    iter_timings.push_back(time);
+    // Do not count the first iteration
+    if (i > 0) {
+      double time = timer.seconds();
+      total_time += time;
+      iter_timings.push_back(time);
+    }
   }
 
   int rank = -1;
@@ -41,7 +63,7 @@ std::tuple<std::vector<double>, double> runBenchmark() {
 
 int main(int argc, char** argv) {
   if (argc > 1) {
-    iters = atoi(argv[1]);
+    iters = atoi(argv[1]) + 1; // add one iteration since we will drop the first one
     M = N = K = atoi(argv[2]);
   }
   std::cout << "iters: " << iters << ", M=N=K=" << M << std::endl;
@@ -58,8 +80,9 @@ int main(int argc, char** argv) {
   int name_len;
   MPI_Get_processor_name(processor_name, &name_len);
 
+  sensors::runSensorsAndReduceOutput(processor_name, "pre");
   auto const& [iter_timings, total_time] = runBenchmark();
-  sensors::runSensorsAndReduceOutput(processor_name);
+  sensors::runSensorsAndReduceOutput(processor_name, "post");
 
   std::vector<double> all_times;
   all_times.resize(num_ranks);
@@ -100,7 +123,7 @@ int main(int argc, char** argv) {
         << std::string(&all_processor_names[cur_rank * MPI_MAX_PROCESSOR_NAME])
         << "): " << time << ": breakdown: ";
       for (int i = cur; i < iters + cur; i++) {
-        std::cout << all_iter_times[cur] << " ";
+        std::cout << all_iter_times[i] << " ";
       }
       std::cout << std::endl;
       cur += iters;
