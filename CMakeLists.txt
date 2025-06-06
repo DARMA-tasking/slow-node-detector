@@ -11,6 +11,7 @@ set(SLOW_NODE_EXE slow_node)
 add_executable(
   ${SLOW_NODE_EXE}
   "${CMAKE_SOURCE_DIR}/src/slow_node.cc"
+  "${CMAKE_SOURCE_DIR}/src/benchmarks.cc"
   "${CMAKE_SOURCE_DIR}/src/sensors.cc"
   "${CMAKE_SOURCE_DIR}/src/freq.cc"
 )

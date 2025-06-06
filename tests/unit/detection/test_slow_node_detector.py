@@ -18,7 +18,7 @@ class TestConfig(unittest.TestCase):
         self.spn = 1
 
         # Determine expected values
-        self.expected_slow_ranks = [1, 2, 4, 6, 7, 9, 10, 11]
+        self.expected_slow_ranks = [1, 2]
         self.expected_slow_nodes = []
         self.expected_overheated_nodes = ["ozark"]
 
@@ -28,6 +28,8 @@ class TestConfig(unittest.TestCase):
             sensors=self.sensors_file,
             num_nodes=2,
             pct=0.05,
+            benchmark="level3",
+            type="double",
             spn=self.spn,
             rpn=self.rpn,
             plot_rank_breakdowns=False,
