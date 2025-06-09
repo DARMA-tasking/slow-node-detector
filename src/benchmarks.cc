@@ -2,6 +2,10 @@
 #include <mpi.h>
 #include <Kokkos_Random.hpp>
 
+#include <unordered_map>
+
+using benchmark_result_t = std::tuple<std::vector<double>, double>;
+using all_results_t = std::unordered_map<std::string, benchmark_result_t>
 
 template <>
 std::string typeToString<double>() {
@@ -24,7 +28,7 @@ std::string benchmarkToString(const benchmarks& b) {
 }
 
 template <typename T>
-std::tuple<std::vector<double>, double> runBenchmarkLevel1(int N, int iters) {
+benchmark_results_t runBenchmarkLevel1(int N, int iters) {
     std::cout << "-- level 1 benchmark [" << typeToString<T>() << "] -- " << std::endl;
 
     Kokkos::View<T*> x("x", N);
@@ -63,7 +67,7 @@ std::tuple<std::vector<double>, double> runBenchmarkLevel1(int N, int iters) {
 }
 
 template <typename T>
-std::tuple<std::vector<double>, double> runBenchmarkLevel2(int M, int N, int iters) {
+benchmark_results_t runBenchmarkLevel2(int M, int N, int iters) {
     std::cout << "-- level 2 benchmark [" << typeToString<T>() << "] -- " << std::endl;
 
     Kokkos::View<T*> x("x", M);
@@ -112,7 +116,7 @@ std::tuple<std::vector<double>, double> runBenchmarkLevel2(int M, int N, int ite
 }
 
 template <typename T>
-std::tuple<std::vector<double>, double> runBenchmarkLevel3() {
+benchmark_results_t runBenchmarkLevel3() {
     std::cout << "-- level 3 benchmark [" << typeToString<T>() << "] -- " << std::endl;
     Kokkos::View<T**> A("A", M, N);
     Kokkos::View<T**> B("B", N, K);
@@ -165,7 +169,7 @@ std::tuple<std::vector<double>, double> runBenchmarkLevel3() {
 }
 
 template <typename T>
-std::tuple<std::vector<double>, double> runBenchmarkLevel3() {
+benchmark_results_t runBenchmarkLevel3() {
     std::cout << "-- level 3 benchmark [" << typeToString<T>() << "] -- " << std::endl;
     Kokkos::View<T**> A("A", M, N);
     Kokkos::View<T**> B("B", N, K);
@@ -216,19 +220,9 @@ std::tuple<std::vector<double>, double> runBenchmarkLevel3() {
 
     return std::make_tuple(iter_timings, total_time);
 }
-Assistant
-
-Certainly! Below is an implementation of a benchmark function that performs the MKL DPOTRF operation, which is used for Cholesky factorization of a symmetric positive definite matrix. This benchmark follows the same style as your provided runBenchmarkLevel3 function.
-
-#include <iostream>
-#include <vector>
-#include <tuple>
-#include <mkl.h>
-#include <Kokkos_Core.hpp>
-#include <mpi.h>
 
 template <typename T>
-std::tuple<std::vector<double>, double> runBenchmarkDPOTRF(int N, int iters) {
+benchmark_results_t runBenchmarkDPOTRF(int N, int iters) {
     std::cout << "-- dpotrf benchmark [" << typeToString<T>() << "] -- " << std::endl;
 
     // Define matrix size
@@ -280,7 +274,7 @@ std::tuple<std::vector<double>, double> runBenchmarkDPOTRF(int N, int iters) {
 }
 
 template <typename T>
-std::tuple<std::vector<double>, double> runBenchmark(benchmarks type, int M, int N, int K, int iters) {
+benchmark_results_t runBenchmark(benchmarks type, int M, int N, int K, int iters) {
     switch (type) {
         case level1:
             return runBenchmarkLevel1<T>(N, iters);
@@ -295,65 +289,75 @@ std::tuple<std::vector<double>, double> runBenchmark(benchmarks type, int M, int
     }
 }
 
-void reduceAndPrintBenchmarkOutput(
-    std::vector<double> iter_timings,
-    double total_time,
-    std::string benchmark)
+all_results_t runAllBenchmarks(int M, int N, int K, int iters) {
+    all_results_t all_results;
+    for (int i=0; i < benchmarks::num_benchmarks; i++) {
+        auto b = static_cast<benchmarks>(i);
+        std::string benchmark_str = benchmarkToString(b) + "_double";
+        all_results[benchmark_str] = runBenchmark<T>(b, M, N, K, iters);
+    }
+    return all_results;
+}
+
+void reduceAndPrintBenchmarkOutput(all_results_t benchmark_results)
 {
     int rank = -1;
     int num_ranks = 0;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &num_ranks);
 
-    char processor_name[MPI_MAX_PROCESSOR_NAME];
-    int name_len;
-    MPI_Get_processor_name(processor_name, &name_len);
+    for (const auto& [benchmark_str, benchmark_results]: benchmark_results) {
+        auto const& [iter_timings, total_time] = benchmark_results;
+        char processor_name[MPI_MAX_PROCESSOR_NAME];
+        int name_len;
+        MPI_Get_processor_name(processor_name, &name_len);
 
-    std::vector<double> all_times;
-    all_times.resize(num_ranks);
+        std::vector<double> all_times;
+        all_times.resize(num_ranks);
 
-    std::vector<double> all_iter_times;
-    all_iter_times.resize(num_ranks * iters);
+        std::vector<double> all_iter_times;
+        all_iter_times.resize(num_ranks * iters);
 
-    std::vector<char> all_processor_names;
-    all_processor_names.resize(num_ranks * MPI_MAX_PROCESSOR_NAME);
+        std::vector<char> all_processor_names;
+        all_processor_names.resize(num_ranks * MPI_MAX_PROCESSOR_NAME);
 
-    if (rank == 0) {
-        std::cout << "num_ranks: " << num_ranks << std::endl;
-    }
+        if (rank == 0) {
+            std::cout << "num_ranks: " << num_ranks << std::endl;
+        }
 
-    MPI_Gather(
-        &total_time, 1, MPI_DOUBLE,
-        &all_times[0], 1, MPI_DOUBLE, 0,
-        MPI_COMM_WORLD
-    );
+        MPI_Gather(
+            &total_time, 1, MPI_DOUBLE,
+            &all_times[0], 1, MPI_DOUBLE, 0,
+            MPI_COMM_WORLD
+        );
 
-    MPI_Gather(
-        &iter_timings[0], iters, MPI_DOUBLE,
-        &all_iter_times[0], iters, MPI_DOUBLE, 0,
-        MPI_COMM_WORLD
-    );
+        MPI_Gather(
+            &iter_timings[0], iters, MPI_DOUBLE,
+            &all_iter_times[0], iters, MPI_DOUBLE, 0,
+            MPI_COMM_WORLD
+        );
 
-    MPI_Gather(
-        &processor_name, MPI_MAX_PROCESSOR_NAME, MPI_CHAR,
-        &all_processor_names[0], MPI_MAX_PROCESSOR_NAME, MPI_CHAR, 0,
-        MPI_COMM_WORLD
-    );
+        MPI_Gather(
+            &processor_name, MPI_MAX_PROCESSOR_NAME, MPI_CHAR,
+            &all_processor_names[0], MPI_MAX_PROCESSOR_NAME, MPI_CHAR, 0,
+            MPI_COMM_WORLD
+        );
 
-    if (rank == 0) {
-        int cur_rank = 0;
-        int cur = 0;
-        std::cout << "=== " << benchmark << " ===" << std::endl;
-        for (auto&& time : all_times) {
-            std::cout << "gather: " << cur_rank << " ("
-                << std::string(&all_processor_names[cur_rank * MPI_MAX_PROCESSOR_NAME])
-                << "): " << time << ": breakdown: ";
-            for (int i = cur; i < iters + cur; i++) {
-                std::cout << all_iter_times[i] << " ";
+        if (rank == 0) {
+            int cur_rank = 0;
+            int cur = 0;
+            std::cout << "=== " << benchmark << " ===" << std::endl;
+            for (auto&& time : all_times) {
+                std::cout << "gather: " << cur_rank << " ("
+                    << std::string(&all_processor_names[cur_rank * MPI_MAX_PROCESSOR_NAME])
+                    << "): " << time << ": breakdown: ";
+                for (int i = cur; i < iters + cur; i++) {
+                    std::cout << all_iter_times[i] << " ";
+                }
+                std::cout << std::endl;
+                cur += iters;
+                cur_rank++;
             }
-            std::cout << std::endl;
-            cur += iters;
-            cur_rank++;
         }
     }
 }

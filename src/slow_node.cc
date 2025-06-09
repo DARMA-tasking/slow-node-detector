@@ -22,12 +22,14 @@ int main(int argc, char** argv) {
   Kokkos::initialize(argc, argv);
 
   // Loop through all available benchmarks
+  sensors::runSensorsAndReduceOutput(processor_name, "pre");
+  auto all_benchmark_output = runAllBenchmarks(M, N, K, iters);
+  sensors::runSensorsAndReduceOutput(processor_name, "post");
+  printBenchmarkOutput(all_benchmark_output);
   for (int i=0; i < benchmarks::num_benchmarks; i++) {
     auto benchmark_type = static_cast<benchmarks>(i);
     std::string benchmark_str = benchmarkToString(benchmark_type) + "_double";
-    sensors::runSensorsAndReduceOutput(processor_name, "pre_" + benchmark_str);
     auto const& [iter_timings, total_time] results = runBenchmark<double>(benchmark_type, M, N, K, iters);
-    sensors::runSensorsAndReduceOutput(processor_name, "post" + benchmark_str);
     reduceAndPrintBenchmarkOutput(iter_timings, total_time, benchmark_str);
   }
 
