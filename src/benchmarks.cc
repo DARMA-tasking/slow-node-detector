@@ -4,8 +4,7 @@
 
 #include <unordered_map>
 
-using benchmark_result_t = std::tuple<std::vector<double>, double>;
-using all_results_t = std::unordered_map<std::string, benchmark_result_t>
+namespace benchmarks {
 
 template <>
 std::string typeToString<double>() {
@@ -274,8 +273,8 @@ benchmark_results_t runBenchmarkDPOTRF(int N, int iters) {
 }
 
 template <typename T>
-benchmark_results_t runBenchmark(benchmarks type, int M, int N, int K, int iters) {
-    switch (type) {
+benchmark_results_t runBenchmark(benchmark_types b, int M, int N, int K, int iters) {
+    switch (b) {
         case level1:
             return runBenchmarkLevel1<T>(N, iters);
         case level2:
@@ -291,15 +290,16 @@ benchmark_results_t runBenchmark(benchmarks type, int M, int N, int K, int iters
 
 all_results_t runAllBenchmarks(int M, int N, int K, int iters) {
     all_results_t all_results;
-    for (int i=0; i < benchmarks::num_benchmarks; i++) {
-        auto b = static_cast<benchmarks>(i);
-        std::string benchmark_str = benchmarkToString(b) + "_double";
-        all_results[benchmark_str] = runBenchmark<T>(b, M, N, K, iters);
+    for (int i=0; i < benchmark_types::num_benchmarks; i++) {
+        auto b = static_cast<benchmark_types>(i);
+        std::string benchmark_str = benchmarkToString(b);
+        all_results[benchmark_str + "_double"] = runBenchmark<double>(b, M, N, K, iters);
+        all_results[benchmark_str + "_complex"] = runBenchmark<std::complex<double>>(b, M, N, K, iters);
     }
     return all_results;
 }
 
-void reduceAndPrintBenchmarkOutput(all_results_t benchmark_results)
+void printBenchmarkOutput(all_results_t benchmark_results)
 {
     int rank = -1;
     int num_ranks = 0;
@@ -346,7 +346,7 @@ void reduceAndPrintBenchmarkOutput(all_results_t benchmark_results)
         if (rank == 0) {
             int cur_rank = 0;
             int cur = 0;
-            std::cout << "=== " << benchmark << " ===" << std::endl;
+            std::cout << "=== " << benchmark_str << " ===" << std::endl;
             for (auto&& time : all_times) {
                 std::cout << "gather: " << cur_rank << " ("
                     << std::string(&all_processor_names[cur_rank * MPI_MAX_PROCESSOR_NAME])
@@ -361,3 +361,4 @@ void reduceAndPrintBenchmarkOutput(all_results_t benchmark_results)
         }
     }
 }
+} // end namespace benchmarks

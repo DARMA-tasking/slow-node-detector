@@ -1,6 +1,11 @@
 #include <std::string>
 
-enum benchmarks {
+namespace benchmarks {
+
+using benchmark_result_t = std::tuple<std::vector<double>, double>;
+using all_results_t = std::unordered_map<std::string, benchmark_result_t>
+
+enum benchmarks_types {
     level1,
     level2,
     level3,
@@ -14,22 +19,22 @@ std::string typeToString();
 std::string benchmarkToString(const benchmarks& b);
 
 template <typename T>
-std::tuple<std::vector<double>, double> runBenchmarkLevel1(int N, int iters);
+benchmark_result_t runBenchmarkLevel1(int N, int iters);
 
 template <typename T>
-std::tuple<std::vector<double>, double> runBenchmarkLevel2(int M, int N, int iters);
+benchmark_result_t runBenchmarkLevel2(int M, int N, int iters);
 
 template <typename T>
-std::tuple<std::vector<double>, double> runBenchmarkLevel3(int M, int N, int K, int iters);
+benchmark_result_t runBenchmarkLevel3(int M, int N, int K, int iters);
 
 template <typename T>
-std::tuple<std::vector<double>, double> runBenchmarkDPOTRF(int N, int iters);
+benchmark_result_t runBenchmarkDPOTRF(int N, int iters);
 
 template <typename T>
-std::tuple<std::vector<double>, double> runBenchmark(
-    benchmarks type, int M, int N, int K, int iters);
+benchmark_result_t runBenchmark(benchmarks type, int M, int N, int K, int iters);
 
-void reduceAndPrintBenchmarkOutput(
-    std::vector<double> iter_timings,
-    double total_time,
-    std::string benchmark);
+all_results_t runAllBenchmarks(int M, int N, int K, int iters);
+
+void printBenchmarkOutput(all_results_t benchmark_results);
+
+} // end namespace benchmarks
