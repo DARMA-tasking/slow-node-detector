@@ -7,38 +7,46 @@ def matchRegex(pattern: str, line: str):
         return tuple(match.groups())
     raise RuntimeError(f"regex matching failed on line {line}")
 
-def parseOutput(slownode_file):
+def parseOutput(slownode_file, benchmark, datatype):
     """Parses text output from slow_node.cc"""
     rank_times = {}
     rank_breakdowns = {}
     rank_to_node_map = {}
+    is_parsing=False
     with open(slownode_file, "r") as output:
         for line in output:
-            if line.startswith("gather"):
-                # splits: ['gather', rank_info, total_time, 'breakdown', [times]]
-                splits = line.split(":")
+            if line.startswith(f"{benchmark}_{datatype}"):
+                is_parsing = True
 
-                # 1. Determine the Rank ID (and node name, if present)
-                raw_rank_info = splits[1].strip()
-                # raw_rank_info = 'rank_id (node)'
-                rank_info = re.findall(
-                    r"(\d+)\s+\(([^)]+)\)",
-                    raw_rank_info
-                )[0]
-                rank_id = int(rank_info[0])
-                node_name = rank_info[1]
-                rank_to_node_map[rank_id] = node_name
+            if is_parsing:
+                if line.startswith("gather"):
+                    # splits: ['gather', rank_info, total_time, 'breakdown', [times]]
+                    splits = line.split(":")
 
-                # 2. Get the total time for the current rank
-                total_time =  float(splits[2].strip())
+                    # 1. Determine the Rank ID (and node name, if present)
+                    raw_rank_info = splits[1].strip()
+                    # raw_rank_info = 'rank_id (node)'
+                    rank_info = re.findall(
+                        r"(\d+)\s+\(([^)]+)\)",
+                        raw_rank_info
+                    )[0]
+                    rank_id = int(rank_info[0])
+                    node_name = rank_info[1]
+                    rank_to_node_map[rank_id] = node_name
 
-                # 3. Isolate the times for each iteration on the current rank
-                breakdown = splits[4].strip()
-                breakdown_list = [float(t) for t in breakdown.split(" ")]
+                    # 2. Get the total time for the current rank
+                    total_time =  float(splits[2].strip())
 
-                # Populate rank data dicts
-                rank_times[rank_id] = total_time
-                rank_breakdowns[rank_id] = breakdown_list
+                    # 3. Isolate the times for each iteration on the current rank
+                    breakdown = splits[4].strip()
+                    breakdown_list = [float(t) for t in breakdown.split(" ")]
+
+                    # Populate rank data dicts
+                    rank_times[rank_id] = total_time
+                    rank_breakdowns[rank_id] = breakdown_list
+
+                elif line.strip() == "":
+                    is_parsing = False
 
     return rank_times, rank_breakdowns, rank_to_node_map
 
@@ -52,7 +60,7 @@ def parseSensors(sensors_file):
     with open(sensors_file, 'r') as sensor_data:
         for line in sensor_data:
             if line.startswith("Node"):
-                pattern = r"Node (\w+), Socket (\d+), Core (\d+): (\d+)(?:°C| C), (\d+) KHz"
+                pattern = r"Node (\w+), Socket (\d+), Core (\d+): (\d+)(?:°C| C), (?:-|)(\d+) KHz"
 
                 node_name,  \
                 socket_str, \

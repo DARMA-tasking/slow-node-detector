@@ -21,11 +21,15 @@ int main(int argc, char** argv) {
   MPI_Init(&argc, &argv);
   Kokkos::initialize(argc, argv);
 
+  char processor_name[MPI_MAX_PROCESSOR_NAME];
+  int name_len;
+  MPI_Get_processor_name(processor_name, &name_len);
+
   // Loop through all available benchmarks
   sensors::runSensorsAndReduceOutput(processor_name, "pre");
   auto output = benchmarks::runAllBenchmarks(M, N, K, iters);
   sensors::runSensorsAndReduceOutput(processor_name, "post");
-  benchmarks::printBenchmarkOutput(output);
+  benchmarks::printBenchmarkOutput(output, iters);
 
   Kokkos::finalize();
   MPI_Finalize();
