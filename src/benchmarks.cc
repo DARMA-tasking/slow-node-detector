@@ -149,31 +149,30 @@ benchmark_results_t runBenchmarkLevel3(int M, int N, int K, int iters) {
 
 template <typename T>
 benchmark_results_t runBenchmarkDPOTRF(int N, int iters) {
-    // Define matrix size
     Kokkos::View<T**> A("A", N, N);
 
-    // Fill matrix A with random values
     Kokkos::Random_XorShift64_Pool pool(123);
     Kokkos::fill_random(A, pool, 10.0);
 
     // Make A symmetric positive definite
     Kokkos::parallel_for("MakeSPD", N, KOKKOS_LAMBDA(int i) {
         for (int j = 0; j < N; j++) {
-            A(i, j) = A(i, j) + A(j, i); // Symmetrize
+            A(i, j) = A(i, j) + A(j, i);
         }
     });
+
     Kokkos::fence();
 
-    // Prepare for MKL DPOTRF
     T* A_ptr = A.data();
+
     std::vector<double> iter_timings;
     double total_time = 0.0;
+
     long long N_ll = static_cast<long long>(N);
     char uplo = 'L';
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-    // Perform the benchmark iterations
     for (int i = 0; i < iters; i++) {
         long long info;
         Kokkos::Timer timer;
