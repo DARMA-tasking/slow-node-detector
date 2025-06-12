@@ -197,30 +197,28 @@ benchmark_results_t runBenchmarkDPOTRF(int N, int iters) {
 }
 
 template <typename T>
-benchmark_results_t runBenchmark(benchmark_types b, int M, int N, int K, int iters) {
+benchmark_results_t runBenchmark(benchmark_types b, std::vector<int> sizes, int iters) {
     switch (b) {
         case level1:
-            return runBenchmarkLevel1<T>(N, iters);
+            return runBenchmarkLevel1<T>(sizes[0], iters);
         case level2:
-            return runBenchmarkLevel2<T>(M, N, iters);
+            return runBenchmarkLevel2<T>(sizes[1], sizes[2], iters);
         case level3:
-            return runBenchmarkLevel3<T>(M, N, K, iters);
+            return runBenchmarkLevel3<T>(sizes[3], sizes[4], sizes[5], iters);
         case dpotrf:
-            return runBenchmarkDPOTRF<T>(N, iters);
+            return runBenchmarkDPOTRF<T>(sizes[6], iters);
         default:
             throw std::invalid_argument("Unsupported benchmark type");
     }
 }
 
-all_results_t runAllBenchmarks(int M, int N1, int N2, int N3, int K, int iters) {
+all_results_t runAllBenchmarks(std::vector<int> sizes, int iters) {
     all_results_t all_results;
-    int N;
     for (int i=0; i < benchmark_types::num_benchmarks; i++) {
-        N = i == 0 ? N1 : (i == 1 ? N2 : N3);
         auto b = static_cast<benchmark_types>(i);
         std::string benchmark_str = benchmarkToString(b);
-        all_results[benchmark_str + "_double"] = runBenchmark<double>(b, M, N, K, iters);
-        all_results[benchmark_str + "_complex"] = runBenchmark<Kokkos::complex<double>>(b, M, N, K, iters);
+        all_results[benchmark_str + "_double"] = runBenchmark<double>(b, sizes, iters);
+        all_results[benchmark_str + "_complex"] = runBenchmark<Kokkos::complex<double>>(b, sizes, iters);
     }
     return all_results;
 }
