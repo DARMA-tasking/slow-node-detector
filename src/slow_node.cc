@@ -28,7 +28,7 @@ static int K = 128;
 int main(int argc, char** argv) {
 
   if (argc > 1) {
-    iters = atoi(argv[1]) + 1; // add one iteration since we will drop the first one
+    iters = atoi(argv[1]);
     M = N1 = N2 = N3 = K = atoi(argv[2]);
     if (argc > 3) {
       N1 = N2 = N3 = atoi(argv[3]);
@@ -53,7 +53,7 @@ int main(int argc, char** argv) {
 
   // Loop through all available benchmarks
   sensors::runSensorsAndReduceOutput(processor_name, "pre");
-  auto output = benchmarks::runAllBenchmarks(M, N1, N2, N3, K, iters);
+  auto output = benchmarks::runAllBenchmarks(M, N1, N2, N3, K, iters + 1); // add one iteration since we'll drop the first one
   sensors::runSensorsAndReduceOutput(processor_name, "post");
   benchmarks::printBenchmarkOutput(output, iters);
 
