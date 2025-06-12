@@ -37,7 +37,7 @@ benchmark_results_t runBenchmarkDPOTRF(int N, int iters);
 template <typename T>
 benchmark_results_t runBenchmark(benchmark_types b, int M, int N, int K, int iters);
 
-all_results_t runAllBenchmarks(int M, int N, int K, int iters);
+all_results_t runAllBenchmarks(int M, int N1, int N2, int N3, int K, int iters);
 
 void printBenchmarkOutput(all_results_t benchmark_results, int iters);
 

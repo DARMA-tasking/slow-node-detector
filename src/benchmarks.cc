@@ -11,7 +11,7 @@ namespace benchmarks {
 
 template <>
 std::string typeToString<double>() {
-    return "double";
+    return "double ";
 }
 
 template <>
@@ -61,7 +61,7 @@ benchmark_results_t runBenchmarkLevel1(int N, int iters) {
 
     int rank = -1;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    std::cout << "[level1 " << typeToString<T>() << "] rank: " << rank << ", total_time=" << total_time << std::endl;
+    std::cout << "[level1 " << typeToString<T>() << "] (N=" << N << ") rank: " << rank << ", total_time=" << total_time << std::endl;
 
     return std::make_tuple(iter_timings, total_time);
 }
@@ -101,7 +101,7 @@ benchmark_results_t runBenchmarkLevel2(int M, int N, int iters) {
 
     int rank = -1;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    std::cout << "[level2 " << typeToString<T>() << "] rank: " << rank << ", total_time=" << total_time << std::endl;
+    std::cout << "[level2 " << typeToString<T>() << "] (M=" << M << ", N=" << N << ") rank: " << rank << ", total_time=" << total_time << std::endl;
 
     return std::make_tuple(iter_timings, total_time);
 }
@@ -142,7 +142,7 @@ benchmark_results_t runBenchmarkLevel3(int M, int N, int K, int iters) {
     int rank = -1;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    std::cout << "[level3 " << typeToString<T>() << "] rank: " << rank << ", total_time=" << total_time << std::endl;
+    std::cout << "[level3 " << typeToString<T>() << "] (M=" << M << ", N=" << N << ", K=" << K << ") rank: " << rank << ", total_time=" << total_time << std::endl;
 
     return std::make_tuple(iter_timings, total_time);
 }
@@ -191,7 +191,7 @@ benchmark_results_t runBenchmarkDPOTRF(int N, int iters) {
     int rank = -1;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    std::cout << "[dpotrf " << typeToString<T>() << "] rank: " << rank << ", total_time=" << total_time << std::endl;
+    std::cout << "[dpotrf " << typeToString<T>() << "] (N=" << N << ") rank: " << rank << ", total_time=" << total_time << std::endl;
 
     return std::make_tuple(iter_timings, total_time);
 }
@@ -212,9 +212,11 @@ benchmark_results_t runBenchmark(benchmark_types b, int M, int N, int K, int ite
     }
 }
 
-all_results_t runAllBenchmarks(int M, int N, int K, int iters) {
+all_results_t runAllBenchmarks(int M, int N1, int N2, int N3, int K, int iters) {
     all_results_t all_results;
+    int N;
     for (int i=0; i < benchmark_types::num_benchmarks; i++) {
+        N = i == 0 ? N1 : (i == 1 ? N2 : N3);
         auto b = static_cast<benchmark_types>(i);
         std::string benchmark_str = benchmarkToString(b);
         all_results[benchmark_str + "_double"] = runBenchmark<double>(b, M, N, K, iters);
