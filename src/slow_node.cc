@@ -24,14 +24,22 @@ int main(int argc, char** argv) {
 
   if (argc > 1) {
     iters = atoi(argv[1]);
-    sizes.push_back(atoi(argv[2])); /* N1 */
-    sizes.push_back(atoi(argv[3])); /* M2 */
-    sizes.push_back(atoi(argv[4])); /* N2 */
-    sizes.push_back(atoi(argv[5])); /* M3 */
-    sizes.push_back(atoi(argv[6])); /* N3 */
-    sizes.push_back(atoi(argv[7])); /* K3 */
-    sizes.push_back(atoi(argv[8])); /* N4 */
+    N1 = atoi(argv[2]);
+    M2 = atoi(argv[3]);
+    N2 = atoi(argv[4]);
+    M3 = atoi(argv[5]);
+    N3 = atoi(argv[6]);
+    K3 = atoi(argv[7]);
+    N4 = atoi(argv[8]);
   }
+
+  sizes.push_back(N1);
+  sizes.push_back(M2);
+  sizes.push_back(N2);
+  sizes.push_back(M3);
+  sizes.push_back(N3);
+  sizes.push_back(K3);
+  sizes.push_back(N4);
 
   MPI_Init(&argc, &argv);
   Kokkos::initialize(argc, argv);
