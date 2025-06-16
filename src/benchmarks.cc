@@ -34,8 +34,8 @@ template <typename T>
 benchmark_results_t runBenchmarkLevel1(std::size_t flops, int iters) {
     /*
      * Level 1 FLOPS:
-     *   double:  2N−1 (one mult and one add for each element, minus one add for the final result).
-     *   complex: 4N−1 (two mults and two adds for each element, minus one add for the final result).
+     *   double:  2N−1
+     *   complex: 4N−1
      */
     int divisor = ops::isDouble<T>() ? 2 : 4;
     int N = static_cast<int>((flops + 1) / divisor);
@@ -136,7 +136,7 @@ benchmark_results_t runBenchmarkLevel3(std::size_t flops, int iters) {
     int num_elements = static_cast<int>(flops / divisor);
     int M = static_cast<int>(std::cbrt(num_elements));
     int N = static_cast<int>(std::sqrt(num_elements / M));
-    int K = num_elements / N;
+    int K = num_elements / N / M;
 
     Kokkos::View<T**> A("A", M, N);
     Kokkos::View<T**> B("B", N, K);
@@ -182,9 +182,9 @@ benchmark_results_t runBenchmarkDPOTRF(std::size_t flops, int iters) {
     /*
      * DPOTRF FLOPS:
      *   double:  1/3 * N^3
-     *   complex: 4/3 * N^3
+     *   complex: 2/3 * N^3
      */
-    double mult = ops::isDouble<T>() ? 3.0 : 3.0 / 4.0;
+    double mult = ops::isDouble<T>() ? 3.0 : 3.0 / 2.0;
     auto N = static_cast<long long>(std::cbrt(mult * flops));
 
     Kokkos::View<T**> A("A", N, N);
@@ -206,15 +206,13 @@ benchmark_results_t runBenchmarkDPOTRF(std::size_t flops, int iters) {
     std::vector<double> iter_timings;
     double total_time = 0.0;
 
-    char uplo = 'L';
+    // char uplo = 'L';
 
     MPI_Barrier(MPI_COMM_WORLD);
 
     for (int i = 0; i < iters; i++) {
-        long long info;
         Kokkos::Timer timer;
-        ops::dpotrf<T>(uplo, N, A_ptr, N, &info);
-
+        ops::dpotrf<T>('L', N, A_ptr, N);
         Kokkos::fence();
 
         // Skip the first iteration
@@ -251,9 +249,11 @@ benchmark_results_t runBenchmark(benchmark_types b, std::size_t flops, int iters
 
 all_results_t runAllBenchmarks(std::size_t flops, int iters) {
     all_results_t all_results;
+    std::string benchmark_str;
+    benchmark_types b;
     for (int i=0; i < benchmark_types::num_benchmarks; i++) {
-        auto b = static_cast<benchmark_types>(i);
-        std::string benchmark_str = benchmarkToString(b);
+        b = static_cast<benchmark_types>(i);
+        benchmark_str = benchmarkToString(b);
         all_results[benchmark_str + "_double"] = runBenchmark<double>(b, flops, iters);
         all_results[benchmark_str + "_complex"] = runBenchmark<Kokkos::complex<double>>(b, flops, iters);
     }

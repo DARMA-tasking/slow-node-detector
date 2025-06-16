@@ -127,11 +127,11 @@ void level3(
 // DPOTRF
 
 template <typename T>
-void dpotrf(char uplo, long long n, T* a, long long lda, long long* info) {
+void dpotrf(char uplo, long long n, T* a, long long lda) {
     if constexpr (isDouble<T>()) {
-        dpotrf_(&uplo, &n, a, &lda, info);
+        LAPACKE_dpotrf(LAPACK_ROW_MAJOR, uplo, n, a, lda);
     } else if constexpr (isComplex<T>()) {
-        zpotrf_(&uplo, &n, reinterpret_cast<MKL_Complex16*>(a), &lda, info);
+        LAPACKE_zpotrf(LAPACK_ROW_MAJOR, uplo, n, reinterpret_cast<MKL_Complex16*>(a), lda);
     } else {
         warnWrongType("dpotrf");
     }
