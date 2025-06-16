@@ -23,21 +23,21 @@ std::string typeToString();
 std::string benchmarkToString(const benchmark_types& b);
 
 template <typename T>
-benchmark_results_t runBenchmarkLevel1(int N, int iters);
+benchmark_results_t runBenchmarkLevel1(std::size_t flops, int iters);
 
 template <typename T>
-benchmark_results_t runBenchmarkLevel2(int M, int N, int iters);
+benchmark_results_t runBenchmarkLevel2(std::size_t flops, int iters);
 
 template <typename T>
-benchmark_results_t runBenchmarkLevel3(int M, int N, int K, int iters);
+benchmark_results_t runBenchmarkLevel3(std::size_t flops, int iters);
 
 template <typename T>
-benchmark_results_t runBenchmarkDPOTRF(int N, int iters);
+benchmark_results_t runBenchmarkDPOTRF(std::size_t flops, int iters);
 
 template <typename T>
-benchmark_results_t runBenchmark(benchmark_types b, std::vector<int> sizes, int iters);
+benchmark_results_t runBenchmark(benchmark_types b, std::size_t flops, int iters);
 
-all_results_t runAllBenchmarks(std::vector<int> sizes, int iters);
+all_results_t runAllBenchmarks(std::size_t flops, int iters);
 
 void printBenchmarkOutput(all_results_t benchmark_results, int iters);
 

@@ -2,11 +2,13 @@
 #define SRC_OPS_IMPL_H
 
 #include <mkl.h>
+#include <cassert>
 #include <iostream>
 
 #include <Kokkos_Complex.hpp>
 
 #include "ops.h"
+#include "benchmarks.h"
 
 namespace ops {
 
@@ -14,18 +16,19 @@ namespace ops {
 // Helpers
 
 template <typename T>
-constexpr bool isDouble() {
-    if constexpr (std::is_same_v<T, double>) {
+constexpr bool isComplex() {
+    if constexpr (std::is_same_v<T, Kokkos::complex<double>>) {
         return true;
     }
     return false;
 }
 
 template <typename T>
-constexpr bool isComplex() {
-    if constexpr (std::is_same_v<T, Kokkos::complex<double>>) {
+constexpr bool isDouble() {
+    if constexpr (std::is_same_v<T, double>) {
         return true;
     }
+    assert(isComplex<T>(), "Type must be either double or Kokkos::complex<double>.");
     return false;
 }
 

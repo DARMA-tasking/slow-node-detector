@@ -5,6 +5,7 @@
 #include "ops.h"
 #include "benchmarks.h"
 
+#include <cmath>
 #include <iostream>
 
 namespace benchmarks {
@@ -30,7 +31,15 @@ std::string benchmarkToString(const benchmark_types& b) {
 }
 
 template <typename T>
-benchmark_results_t runBenchmarkLevel1(int N, int iters) {
+benchmark_results_t runBenchmarkLevel1(std::size_t flops, int iters) {
+    /*
+     * Level 1 FLOPS:
+     *   double:  2N−1 (one mult and one add for each element, minus one add for the final result).
+     *   complex: 4N−1 (two mults and two adds for each element, minus one add for the final result).
+     */
+    int divisor = constexpr (isDouble<T>()) ? 2 : 4;
+    int N = static_cast<int>((flops + 1) / 4)
+
     Kokkos::View<T*> x("x", N);
     Kokkos::View<T*> y("y", N);
 
@@ -67,7 +76,17 @@ benchmark_results_t runBenchmarkLevel1(int N, int iters) {
 }
 
 template <typename T>
-benchmark_results_t runBenchmarkLevel2(int M, int N, int iters) {
+benchmark_results_t runBenchmarkLevel2(std::size_t flops, int iters) {
+    /*
+     * Level 2 FLOPS:
+     *   double:  2 x M x N
+     *   complex: 8 x M x N
+     */
+    std::size_t divisor = constexpr (isDouble<T>()) ? 2 : 8;
+    int num_elements = static_cast<int>(flops / divisor);
+    int M = static_cast<int>(std::sqrt(num_elements));
+    int N = num_elements / M;
+
     Kokkos::View<T*> x("x", M);
     Kokkos::View<T*> y("y", N);
     Kokkos::View<T**> A("A", M, N);
@@ -107,7 +126,18 @@ benchmark_results_t runBenchmarkLevel2(int M, int N, int iters) {
 }
 
 template <typename T>
-benchmark_results_t runBenchmarkLevel3(int M, int N, int K, int iters) {
+benchmark_results_t runBenchmarkLevel3(std::size_t flops, int iters) {
+    /*
+     * Level 3 FLOPS:
+     *   double:  2 x M x N x K
+     *   complex: 8 x M x N x K
+     */
+    std::size_t divisor = constexpr (isDouble<T>()) ? 2 : 8;
+    int num_elements = static_cast<int>(flops / divisor);
+    int M = static_cast<int>(std::cbrt(num_elements));
+    int N = static_cast<int>(std::sqrt(num_elements / M));
+    int K = num_elements / N
+
     Kokkos::View<T**> A("A", M, N);
     Kokkos::View<T**> B("B", N, K);
     Kokkos::View<T**> C("C", M, K);
@@ -148,7 +178,15 @@ benchmark_results_t runBenchmarkLevel3(int M, int N, int K, int iters) {
 }
 
 template <typename T>
-benchmark_results_t runBenchmarkDPOTRF(int N, int iters) {
+benchmark_results_t runBenchmarkDPOTRF(std::size_t flops, int iters) {
+    /*
+     * DPOTRF FLOPS:
+     *   double:  1/3 * N^3
+     *   complex: 4/3 * N^3
+     */
+    double mult = constexpr (isDouble<T>()) ? 3.0 : 3.0 / 4.0;
+    auto N = static_cast<long long>(std::cbrt(mult * flops));
+
     Kokkos::View<T**> A("A", N, N);
 
     Kokkos::Random_XorShift64_Pool pool(123);
@@ -156,7 +194,7 @@ benchmark_results_t runBenchmarkDPOTRF(int N, int iters) {
 
     // Make A symmetric positive definite
     Kokkos::parallel_for("MakeSPD", N, KOKKOS_LAMBDA(int i) {
-        for (int j = 0; j < N; j++) {
+        for (long long j = 0; j < N; j++) {
             A(i, j) = A(i, j) + A(j, i);
         }
     });
@@ -168,7 +206,6 @@ benchmark_results_t runBenchmarkDPOTRF(int N, int iters) {
     std::vector<double> iter_timings;
     double total_time = 0.0;
 
-    long long N_ll = static_cast<long long>(N);
     char uplo = 'L';
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -176,7 +213,7 @@ benchmark_results_t runBenchmarkDPOTRF(int N, int iters) {
     for (int i = 0; i < iters; i++) {
         long long info;
         Kokkos::Timer timer;
-        ops::dpotrf<T>(uplo, N_ll, A_ptr, N_ll, &info);
+        ops::dpotrf<T>(uplo, N, A_ptr, N, &info);
 
         Kokkos::fence();
 
@@ -197,28 +234,28 @@ benchmark_results_t runBenchmarkDPOTRF(int N, int iters) {
 }
 
 template <typename T>
-benchmark_results_t runBenchmark(benchmark_types b, std::vector<int> sizes, int iters) {
+benchmark_results_t runBenchmark(benchmark_types b, std::size_t flops, int iters) {
     switch (b) {
         case level1:
-            return runBenchmarkLevel1<T>(sizes[0], iters);
+            return runBenchmarkLevel1<T>(flops, iters);
         case level2:
-            return runBenchmarkLevel2<T>(sizes[1], sizes[2], iters);
+            return runBenchmarkLevel2<T>(flops, iters);
         case level3:
-            return runBenchmarkLevel3<T>(sizes[3], sizes[4], sizes[5], iters);
+            return runBenchmarkLevel3<T>(flops, iters);
         case dpotrf:
-            return runBenchmarkDPOTRF<T>(sizes[6], iters);
+            return runBenchmarkDPOTRF<T>(flops, iters);
         default:
             throw std::invalid_argument("Unsupported benchmark type");
     }
 }
 
-all_results_t runAllBenchmarks(std::vector<int> sizes, int iters) {
+all_results_t runAllBenchmarks(std::size_t flops, int iters) {
     all_results_t all_results;
     for (int i=0; i < benchmark_types::num_benchmarks; i++) {
         auto b = static_cast<benchmark_types>(i);
         std::string benchmark_str = benchmarkToString(b);
-        all_results[benchmark_str + "_double"] = runBenchmark<double>(b, sizes, iters);
-        all_results[benchmark_str + "_complex"] = runBenchmark<Kokkos::complex<double>>(b, sizes, iters);
+        all_results[benchmark_str + "_double"] = runBenchmark<double>(b, flops, iters);
+        all_results[benchmark_str + "_complex"] = runBenchmark<Kokkos::complex<double>>(b, flops, iters);
     }
     return all_results;
 }
