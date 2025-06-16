@@ -28,7 +28,7 @@ constexpr bool isDouble() {
     if constexpr (std::is_same_v<T, double>) {
         return true;
     }
-    assert(isComplex<T>(), "Type must be either double or Kokkos::complex<double>.");
+    assert(isComplex<T>() && "Type must be either double or Kokkos::complex<double>.");
     return false;
 }
 

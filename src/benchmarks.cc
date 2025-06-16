@@ -37,8 +37,8 @@ benchmark_results_t runBenchmarkLevel1(std::size_t flops, int iters) {
      *   double:  2N−1 (one mult and one add for each element, minus one add for the final result).
      *   complex: 4N−1 (two mults and two adds for each element, minus one add for the final result).
      */
-    int divisor = constexpr (isDouble<T>()) ? 2 : 4;
-    int N = static_cast<int>((flops + 1) / 4)
+    int divisor = ops::isDouble<T>() ? 2 : 4;
+    int N = static_cast<int>((flops + 1) / divisor);
 
     Kokkos::View<T*> x("x", N);
     Kokkos::View<T*> y("y", N);
@@ -82,7 +82,7 @@ benchmark_results_t runBenchmarkLevel2(std::size_t flops, int iters) {
      *   double:  2 x M x N
      *   complex: 8 x M x N
      */
-    std::size_t divisor = constexpr (isDouble<T>()) ? 2 : 8;
+    std::size_t divisor = ops::isDouble<T>() ? 2 : 8;
     int num_elements = static_cast<int>(flops / divisor);
     int M = static_cast<int>(std::sqrt(num_elements));
     int N = num_elements / M;
@@ -132,11 +132,11 @@ benchmark_results_t runBenchmarkLevel3(std::size_t flops, int iters) {
      *   double:  2 x M x N x K
      *   complex: 8 x M x N x K
      */
-    std::size_t divisor = constexpr (isDouble<T>()) ? 2 : 8;
+    std::size_t divisor = ops::isDouble<T>() ? 2 : 8;
     int num_elements = static_cast<int>(flops / divisor);
     int M = static_cast<int>(std::cbrt(num_elements));
     int N = static_cast<int>(std::sqrt(num_elements / M));
-    int K = num_elements / N
+    int K = num_elements / N;
 
     Kokkos::View<T**> A("A", M, N);
     Kokkos::View<T**> B("B", N, K);
@@ -184,7 +184,7 @@ benchmark_results_t runBenchmarkDPOTRF(std::size_t flops, int iters) {
      *   double:  1/3 * N^3
      *   complex: 4/3 * N^3
      */
-    double mult = constexpr (isDouble<T>()) ? 3.0 : 3.0 / 4.0;
+    double mult = ops::isDouble<T>() ? 3.0 : 3.0 / 4.0;
     auto N = static_cast<long long>(std::cbrt(mult * flops));
 
     Kokkos::View<T**> A("A", N, N);
