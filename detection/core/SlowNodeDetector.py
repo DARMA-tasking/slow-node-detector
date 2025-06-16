@@ -35,7 +35,7 @@ class SlowNodeDetector:
     """
 
     def __init__(
-            self, path, sensors, num_nodes, pct, spn, rpn, plot_rank_breakdowns):
+            self, path, sensors, num_nodes, pct, benchmark, type, spn, rpn, plot_rank_breakdowns):
         # Create empty dicts for storing data
         self.__rank_times = {}
         self.__rank_breakdowns = {}
@@ -49,6 +49,8 @@ class SlowNodeDetector:
         self.__sensors_output_file = sensors
         self.__num_nodes = int(num_nodes) if num_nodes is not None else None
         self.__threshold_pct = float(pct)
+        self.__benchmark = benchmark
+        self.__datatype = type
         self.__spn = int(spn)
         self.__rpn = int(rpn)
         self.__rps = self.__rpn / self.__spn
@@ -87,7 +89,7 @@ class SlowNodeDetector:
         """Parses text output from slow_node.cc"""
         self.__rank_times,      \
         self.__rank_breakdowns, \
-        self.__rank_to_node_map = parseOutput(self.__filepath)
+        self.__rank_to_node_map = parseOutput(self.__filepath, self.__benchmark, self.__datatype)
 
         self.__num_ranks = len(self.__rank_times)
 
@@ -291,6 +293,7 @@ class SlowNodeDetector:
         if print_results:
             s = self.__s(slow_rank_ids)
             n = len(str(abs(int(self.__num_ranks))))
+            print(f"\nPrinting analysis from {self.__benchmark}_{self.__datatype} benchmark...")
             print("\n----------------------------------------------------------")
             print("Across-Rank Analysis")
             print()
