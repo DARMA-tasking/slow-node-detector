@@ -287,7 +287,7 @@ class SlowNodeDetector:
                     slowest_iteration = np.argmax(breakdown)
                     rank_with_slowest_iteration = r_id
         if len(all_ranks_slowest_iters) > 0:
-            all_ranks_slowest_iters = dict(sorted(all_ranks_slowest_iters.items(), reverse=True, key=lambda item: item[1]))
+            all_ranks_slowest_iters = dict(sorted(all_ranks_slowest_iters.items(), reverse=True, key=lambda item: item[1][1]))
 
         # Print results
         if print_results:
