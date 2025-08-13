@@ -35,7 +35,7 @@ class SlowNodeDetector:
     """
 
     def __init__(
-            self, path, sensors, num_nodes, pct, benchmark, type, spn, rpn, plot_rank_breakdowns):
+            self, path, sensors, num_nodes, pct, target_mean, benchmark, type, spn, rpn, plot_rank_breakdowns):
         # Create empty dicts for storing data
         self.__rank_times = {}
         self.__rank_breakdowns = {}
@@ -49,6 +49,7 @@ class SlowNodeDetector:
         self.__sensors_output_file = sensors
         self.__num_nodes = int(num_nodes) if num_nodes is not None else None
         self.__threshold_pct = float(pct)
+        self.__target_mean = target_mean
         self.__benchmark = benchmark
         self.__datatype = type
         self.__spn = int(spn)
@@ -200,6 +201,17 @@ class SlowNodeDetector:
         assert len(outliers) == len(diffs) # sanity check
         return outliers, diffs
 
+    def __findHighLowOutliers(self, data):
+        """
+        Finds data points that are some percentage (given by self.__threshold_pct)
+        higher than the mean of the data.
+        """
+        avg = np.mean(data)
+        outliers = [elt for elt in data if elt > avg * (1.0 + self.__threshold_pct) or elt < avg * (1.0 - self.__threshold_pct)]
+        diffs = [t / avg for t in outliers]
+        assert len(outliers) == len(diffs) # sanity check
+        return outliers, diffs
+
 
     ###########################################################################
     ## Primary analytical functions
@@ -210,7 +222,10 @@ class SlowNodeDetector:
         find any slow (self.__threshold_pct slower than the mean) ranks.
         """
         rank_ids, total_times = zip(*self.__rank_times.items())
-        outliers, slowdowns = self.__findHighOutliers(total_times)
+        if self.__target_mean:
+            outliers, slowdowns = self.__findHighLowOutliers(total_times)
+        else:
+            outliers, slowdowns = self.__findHighOutliers(total_times)
 
         plotData(rank_ids, total_times,
                  "Across-Rank Comparison", "Rank ID",
@@ -432,8 +447,13 @@ class SlowNodeDetector:
             elif num_good_nodes > self.__num_nodes:
                 n_nodes_to_drop = num_good_nodes - self.__num_nodes
                 assert n_nodes_to_drop > 0, f"Cannot drop {n_nodes_to_drop}"
-                #sorted_nodes = self.__sortNodesByExecutionTime(good_node_names)
-                sorted_nodes = self.__sortNodesByMaxRankExecutionTime(good_node_names)
+                if self.__target_mean:
+                    #sorted_nodes = self.__sortNodesByNodeDevFromAvgExecutionTime(good_node_names)
+                    #sorted_nodes = self.__sortNodesByRankDevFromAvgExecutionTime(good_node_names)
+                    sorted_nodes = self.__sortNodesByMaxRankExecutionTime(good_node_names)
+                else:
+                    #sorted_nodes = self.__sortNodesByExecutionTime(good_node_names)
+                    sorted_nodes = self.__sortNodesByMaxRankExecutionTime(good_node_names)
                 print(
                     f"Since the SlowNodeDetector originally found {num_good_nodes} good node{s}, "
                     f"but only {self.__num_nodes} are needed, the following nodes will also be "

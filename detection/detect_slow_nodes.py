@@ -17,6 +17,7 @@ def main():
     parser.add_argument('-s', '--sensors', help='Absolute or relative path to the sensors file that will be analyzed', default=None)
     parser.add_argument('-N', '--num_nodes', help='The number of nodes required by the application', default=None)
     parser.add_argument('-t', '--threshold', help='Percentage above average time that indicates a "slow" rank', default=0.05)
+    parser.add_argument('-m', '--mean', action='store_true', help='Eliminate nodes faster than the mean as well')
     parser.add_argument('-b', '--benchmark', help='Benchmark to analyze: [level1, level2, level3, dpotrf]', default='level3')
     parser.add_argument('-d', '--datatype', help='Datatype of benchmark to analyze: [double, complex]', default='double')
     parser.add_argument('-spn', '--spn', help='Number of sockets per node', default=2)
@@ -32,6 +33,7 @@ def main():
         sensors=sensors_filepath,
         num_nodes=args.num_nodes,
         pct=args.threshold,
+        target_mean=args.mean,
         benchmark=args.benchmark,
         type=args.datatype,
         spn=args.spn,
