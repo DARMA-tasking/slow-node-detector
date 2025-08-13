@@ -142,6 +142,52 @@ class SlowNodeDetector:
         # return sorted(nodes, key=lambda n: self.__getNumberOfSlowRanksOnNode(n))
         return sorted(node_times, key=lambda t: node_times[t])
 
+    def __sortNodesByMaxRankExecutionTime(self, nodes: list):
+        """
+        Takes in a list of node names and sorts them based on total execution time.
+        The fastest nodes will be first, and the slowest will be last.
+        """
+        node_times = {}
+        for r, n in self.__rank_to_node_map.items():
+            if n in nodes:
+                if n not in node_times:
+                    node_times[n] = 0.0
+                if self.__rank_times[r] > node_times[n]:
+                    node_times[n] = self.__rank_times[r]
+        # Alternative:
+        # return sorted(nodes, key=lambda n: self.__getNumberOfSlowRanksOnNode(n))
+        return sorted(node_times, key=lambda t: node_times[t])
+
+    def __sortNodesByNodeDevFromAvgExecutionTime(self, nodes: list):
+        """
+        Takes in a list of node names and sorts them based on how much they deviate
+        from the average total execution time.
+        """
+        node_times = {}
+        for r, n in self.__rank_to_node_map.items():
+            if n in nodes:
+                if n not in node_times:
+                    node_times[n] = 0.0
+                node_times[n] += self.__rank_times[r]
+        avg = np.mean(list(node_times.values()))
+        return sorted(node_times, key=lambda t: abs(node_times[t]-avg))
+
+    def __sortNodesByRankDevFromAvgExecutionTime(self, nodes: list):
+        """
+        Takes in a list of node names and sorts them based on how much they deviate
+        from the average total execution time.
+        """
+        avg = np.mean(list(self.__rank_times.values()))
+        node_dev_times = {}
+        for r, n in self.__rank_to_node_map.items():
+            if n in nodes:
+                if n not in node_dev_times:
+                    node_dev_times[n] = 0.0
+                this_dev_time = abs(self.__rank_times[r]-avg)
+                if this_dev_time > node_dev_times[n]:
+                    node_dev_times[n] = this_dev_time
+        return sorted(node_dev_times, key=lambda t: node_dev_times[t])
+
     def __findHighOutliers(self, data):
         """
         Finds data points that are some percentage (given by self.__threshold_pct)
@@ -386,7 +432,8 @@ class SlowNodeDetector:
             elif num_good_nodes > self.__num_nodes:
                 n_nodes_to_drop = num_good_nodes - self.__num_nodes
                 assert n_nodes_to_drop > 0, f"Cannot drop {n_nodes_to_drop}"
-                sorted_nodes = self.__sortNodesByExecutionTime(good_node_names)
+                #sorted_nodes = self.__sortNodesByExecutionTime(good_node_names)
+                sorted_nodes = self.__sortNodesByMaxRankExecutionTime(good_node_names)
                 print(
                     f"Since the SlowNodeDetector originally found {num_good_nodes} good node{s}, "
                     f"but only {self.__num_nodes} are needed, the following nodes will also be "
