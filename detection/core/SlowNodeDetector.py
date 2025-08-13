@@ -90,7 +90,8 @@ class SlowNodeDetector:
         """Parses text output from slow_node.cc"""
         self.__rank_times,      \
         self.__rank_breakdowns, \
-        self.__rank_to_node_map = parseOutput(self.__filepath, self.__benchmark, self.__datatype)
+        self.__rank_to_node_map, \
+        self.__rank_info = parseOutput(self.__filepath, self.__benchmark, self.__datatype)
 
         self.__num_ranks = len(self.__rank_times)
 

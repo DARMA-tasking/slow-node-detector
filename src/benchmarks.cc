@@ -6,6 +6,8 @@
 #include "benchmarks.h"
 
 #include <iostream>
+#include <tuple>
+#include <string>
 
 namespace benchmarks {
 
@@ -223,6 +225,27 @@ all_results_t runAllBenchmarks(std::vector<int> sizes, int iters) {
     return all_results;
 }
 
+std::tuple<std::string, int, int> getNodeRank() {
+  int world_rank = -1, world_size = -1;
+  MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+
+  char hostname[MPI_MAX_PROCESSOR_NAME];
+  int hostname_len = -1;
+  MPI_Get_processor_name(hostname, &hostname_len);
+
+  MPI_Comm shared_comm;
+  MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &shared_comm);
+
+  int shared_rank = -1, shared_size = -1;
+  MPI_Comm_rank(shared_comm, &shared_rank);
+  MPI_Comm_size(shared_comm, &shared_size);
+
+  MPI_Comm_free(&shared_comm);
+
+  return std::make_tuple(std::string{hostname}, world_rank, shared_rank);
+}
+
 void printBenchmarkOutput(all_results_t benchmark_results, int iters)
 {
     int rank = -1;
@@ -285,5 +308,11 @@ void printBenchmarkOutput(all_results_t benchmark_results, int iters)
             }
         }
     }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    auto rank_info = getNodeRank();
+    std::cout << "NodeInfo: " << std::get<0>(rank_info) << " "
+      << std::get<1>(rank_info) << " " << std::get<2>(rank_info) << std::endl;
+
 }
 } // end namespace benchmarks

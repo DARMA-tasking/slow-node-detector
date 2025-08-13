@@ -12,13 +12,17 @@ def parseOutput(slownode_file, benchmark, datatype):
     rank_times = {}
     rank_breakdowns = {}
     rank_to_node_map = {}
+    rank_info_map = {}
     is_parsing=False
     with open(slownode_file, "r") as output:
         for line in output:
-            if line.startswith(f"{benchmark}_{datatype}"):
+            if line.startswith("NodeInfo:"):
+                # splits: ['NodeInfo:', hostname, world_rank, shared_rank]
+                splits = line.split(" ")
+                rank_info_map[int(splits[2])] = (splits[1], int(splits[3]))
+            elif line.startswith(f"{benchmark}_{datatype}"):
                 is_parsing = True
-
-            if is_parsing:
+            elif is_parsing:
                 if line.startswith("gather"):
                     # splits: ['gather', rank_info, total_time, 'breakdown', [times]]
                     splits = line.split(":")
@@ -48,7 +52,7 @@ def parseOutput(slownode_file, benchmark, datatype):
                 elif line.strip() == "":
                     is_parsing = False
 
-    return rank_times, rank_breakdowns, rank_to_node_map
+    return rank_times, rank_breakdowns, rank_to_node_map, rank_info_map
 
 def parseSensors(sensors_file):
     """
