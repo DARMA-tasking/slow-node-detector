@@ -79,7 +79,7 @@ benchmark_results_t runBenchmarkLevel2(int M, int N, int iters) {
     Kokkos::Random_XorShift64_Pool pool(123);
     Kokkos::fill_random(x, pool, 10.0);
     Kokkos::fill_random(y, pool, 10.0);
-    // Kokkos::fill_random(A, pool, 10.0);
+    Kokkos::fill_random(A, pool, 10.0);
 
     std::vector<double> iter_timings;
     double total_time = 0.0;
@@ -119,6 +119,7 @@ benchmark_results_t runBenchmarkLevel3(int M, int N, int K, int iters) {
     Kokkos::Random_XorShift64_Pool pool(123);
     Kokkos::fill_random(A, pool, 10.0);
     Kokkos::fill_random(B, pool, 10.0);
+    Kokkos::fill_random(C, pool, 10.0);
 
     std::vector<double> iter_timings;
 
