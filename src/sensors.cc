@@ -3,6 +3,7 @@
 #include <fstream>
 #include <filesystem>
 #include <cstdio>
+#include <cstring>
 #include <cassert>
 #include <functional>
 

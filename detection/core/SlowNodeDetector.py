@@ -35,7 +35,7 @@ class SlowNodeDetector:
     """
 
     def __init__(
-            self, path, sensors, num_nodes, pct, spn, rpn, plot_rank_breakdowns):
+            self, path, sensors, num_nodes, pct, benchmark, type, spn, rpn, plot_rank_breakdowns):
         # Create empty dicts for storing data
         self.__rank_times = {}
         self.__rank_breakdowns = {}
@@ -49,6 +49,8 @@ class SlowNodeDetector:
         self.__sensors_output_file = sensors
         self.__num_nodes = int(num_nodes) if num_nodes is not None else None
         self.__threshold_pct = float(pct)
+        self.__benchmark = benchmark
+        self.__datatype = type
         self.__spn = int(spn)
         self.__rpn = int(rpn)
         self.__rps = self.__rpn / self.__spn
@@ -87,7 +89,7 @@ class SlowNodeDetector:
         """Parses text output from slow_node.cc"""
         self.__rank_times,      \
         self.__rank_breakdowns, \
-        self.__rank_to_node_map = parseOutput(self.__filepath)
+        self.__rank_to_node_map = parseOutput(self.__filepath, self.__benchmark, self.__datatype)
 
         self.__num_ranks = len(self.__rank_times)
 
@@ -139,6 +141,54 @@ class SlowNodeDetector:
         # Alternative:
         # return sorted(nodes, key=lambda n: self.__getNumberOfSlowRanksOnNode(n))
         return sorted(node_times, key=lambda t: node_times[t])
+
+    def __sortNodesByMaxRankExecutionTime(self, nodes: list):
+        """
+        Takes in a list of node names and sorts them based on maximum rank
+        execution time on the node. The fastest nodes will be first, and the
+        slowest will be last.
+        """
+        node_times = {}
+        for r, n in self.__rank_to_node_map.items():
+            if n in nodes:
+                if n not in node_times:
+                    node_times[n] = 0.0
+                if self.__rank_times[r] > node_times[n]:
+                    node_times[n] = self.__rank_times[r]
+        # Alternative:
+        # return sorted(nodes, key=lambda n: self.__getNumberOfSlowRanksOnNode(n))
+        return sorted(node_times, key=lambda t: node_times[t])
+
+    def __sortNodesByNodeDevFromAvgExecutionTime(self, nodes: list):
+        """
+        Takes in a list of node names and sorts them based on how much they deviate
+        from the average total execution time.
+        """
+        node_times = {}
+        for r, n in self.__rank_to_node_map.items():
+            if n in nodes:
+                if n not in node_times:
+                    node_times[n] = 0.0
+                node_times[n] += self.__rank_times[r]
+        avg = np.mean(list(node_times.values()))
+        return sorted(node_times, key=lambda t: abs(node_times[t]-avg))
+
+    def __sortNodesByRankDevFromAvgExecutionTime(self, nodes: list):
+        """
+        Takes in a list of node names and sorts them based on the maximum
+        rank deviation from the rank-avg execution time.
+
+        """
+        avg = np.mean(list(self.__rank_times.values()))
+        node_dev_times = {}
+        for r, n in self.__rank_to_node_map.items():
+            if n in nodes:
+                if n not in node_dev_times:
+                    node_dev_times[n] = 0.0
+                this_dev_time = abs(self.__rank_times[r]-avg)
+                if this_dev_time > node_dev_times[n]:
+                    node_dev_times[n] = this_dev_time
+        return sorted(node_dev_times, key=lambda t: node_dev_times[t])
 
     def __findHighOutliers(self, data):
         """
@@ -285,12 +335,13 @@ class SlowNodeDetector:
                     slowest_iteration = np.argmax(breakdown)
                     rank_with_slowest_iteration = r_id
         if len(all_ranks_slowest_iters) > 0:
-            all_ranks_slowest_iters = dict(sorted(all_ranks_slowest_iters.items(), reverse=True, key=lambda item: item[1]))
+            all_ranks_slowest_iters = dict(sorted(all_ranks_slowest_iters.items(), reverse=True, key=lambda item: item[1][1]))
 
         # Print results
         if print_results:
             s = self.__s(slow_rank_ids)
             n = len(str(abs(int(self.__num_ranks))))
+            print(f"\nPrinting analysis from {self.__benchmark}_{self.__datatype} benchmark...")
             print("\n----------------------------------------------------------")
             print("Across-Rank Analysis")
             print()
@@ -383,7 +434,8 @@ class SlowNodeDetector:
             elif num_good_nodes > self.__num_nodes:
                 n_nodes_to_drop = num_good_nodes - self.__num_nodes
                 assert n_nodes_to_drop > 0, f"Cannot drop {n_nodes_to_drop}"
-                sorted_nodes = self.__sortNodesByExecutionTime(good_node_names)
+                #sorted_nodes = self.__sortNodesByExecutionTime(good_node_names)
+                sorted_nodes = self.__sortNodesByMaxRankExecutionTime(good_node_names)
                 print(
                     f"Since the SlowNodeDetector originally found {num_good_nodes} good node{s}, "
                     f"but only {self.__num_nodes} are needed, the following nodes will also be "

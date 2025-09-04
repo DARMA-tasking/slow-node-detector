@@ -17,6 +17,8 @@ def main():
     parser.add_argument('-s', '--sensors', help='Absolute or relative path to the sensors file that will be analyzed', default=None)
     parser.add_argument('-N', '--num_nodes', help='The number of nodes required by the application', default=None)
     parser.add_argument('-t', '--threshold', help='Percentage above average time that indicates a "slow" rank', default=0.05)
+    parser.add_argument('-b', '--benchmark', help='Benchmark to analyze: [level1, level2, level3, dpotrf]', default='level3')
+    parser.add_argument('-d', '--datatype', help='Datatype of benchmark to analyze: [double, complex]', default='double')
     parser.add_argument('-spn', '--spn', help='Number of sockets per node', default=2)
     parser.add_argument('-rpn', '--rpn', help='Number of ranks per node', default=48)
     parser.add_argument('-p', '--plot_all_ranks', action='store_true', help='Plot the breakdowns for every rank')
@@ -30,6 +32,8 @@ def main():
         sensors=sensors_filepath,
         num_nodes=args.num_nodes,
         pct=args.threshold,
+        benchmark=args.benchmark,
+        type=args.datatype,
         spn=args.spn,
         rpn=args.rpn,
         plot_rank_breakdowns=args.plot_all_ranks)
