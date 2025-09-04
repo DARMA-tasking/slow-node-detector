@@ -219,7 +219,9 @@ all_results_t runAllBenchmarks(std::vector<int> sizes, int iters) {
         auto b = static_cast<benchmark_types>(i);
         std::string benchmark_str = benchmarkToString(b);
         all_results[benchmark_str + "_double"] = runBenchmark<double>(b, sizes, iters);
+        MPI_Barrier(MPI_COMM_WORLD);
         all_results[benchmark_str + "_complex"] = runBenchmark<Kokkos::complex<double>>(b, sizes, iters);
+        MPI_Barrier(MPI_COMM_WORLD);
     }
     return all_results;
 }
