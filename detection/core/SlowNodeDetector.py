@@ -144,8 +144,9 @@ class SlowNodeDetector:
 
     def __sortNodesByMaxRankExecutionTime(self, nodes: list):
         """
-        Takes in a list of node names and sorts them based on total execution time.
-        The fastest nodes will be first, and the slowest will be last.
+        Takes in a list of node names and sorts them based on maximum rank
+        execution time on the node. The fastest nodes will be first, and the
+        slowest will be last.
         """
         node_times = {}
         for r, n in self.__rank_to_node_map.items():
@@ -174,8 +175,9 @@ class SlowNodeDetector:
 
     def __sortNodesByRankDevFromAvgExecutionTime(self, nodes: list):
         """
-        Takes in a list of node names and sorts them based on how much they deviate
-        from the average total execution time.
+        Takes in a list of node names and sorts them based on the maximum
+        rank deviation from the rank-avg execution time.
+
         """
         avg = np.mean(list(self.__rank_times.values()))
         node_dev_times = {}
