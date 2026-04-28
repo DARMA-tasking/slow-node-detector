@@ -11,8 +11,11 @@ set(SLOW_NODE_EXE slow_node)
 add_executable(
   ${SLOW_NODE_EXE}
   "${CMAKE_SOURCE_DIR}/src/slow_node.cc"
+  "${CMAKE_SOURCE_DIR}/src/benchmarks.cc"
+  "${CMAKE_SOURCE_DIR}/src/perf_benchmark.cc"
   "${CMAKE_SOURCE_DIR}/src/sensors.cc"
   "${CMAKE_SOURCE_DIR}/src/freq.cc"
+  "${CMAKE_SOURCE_DIR}/src/perf.cc"
 )
 
 find_package(MPI REQUIRED)
@@ -29,4 +32,15 @@ else()
   message(STATUS "Did not find Trilinos. Searching for kokkos directly.")
   find_package(Kokkos REQUIRED)
   target_link_libraries(${SLOW_NODE_EXE} PUBLIC Kokkos::kokkos)
+endif()
+
+option(SLOWNODE_USE_VT "Use VT runtime" OFF)
+if (SLOWNODE_USE_VT)
+  find_package(vt)
+  if (vt_FOUND)
+    target_link_libraries(${SLOW_NODE_EXE} PUBLIC vt::runtime::vt)
+    target_compile_definitions(${SLOW_NODE_EXE} PUBLIC VT_ENABLED)
+  else()
+    message(WARNING "VT requested but not found. Continuing without VT support.")
+  endif()
 endif()

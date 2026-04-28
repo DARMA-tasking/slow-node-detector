@@ -6,3 +6,7 @@ install
 CMakeFiles
 output
 tests/logs/output
+cmds
+data
+*.log
+*.out
