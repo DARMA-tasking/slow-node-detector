@@ -17,11 +17,15 @@ def normalize_metric_name(metric_name):
     return metric_name.strip().replace("arith_inst_retired_", "")
 
 
+def int_list(values):
+    return [int(value.strip()) for value in values.split(",") if value.strip()] if values else []
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
             "Plot paired mp/nomp boxplots for one metric across loop counts "
-            "from perf benchmark output directories."
+            "from perf benchmark output directories, plus a percent-difference plot."
         )
     )
     parser.add_argument(
@@ -44,16 +48,23 @@ def parse_args():
         help="Benchmark type: double or complex",
     )
     parser.add_argument(
+        "-e",
+        "--exclude",
+        type=int_list,
+        default=[],
+        help="Comma-separated loop counts to exclude from the plots (default: none)",
+    )
+    parser.add_argument(
         "-o",
-        "--output",
+        "--output-prefix",
         default=None,
-        help="Output plot path (default: metric_<type>_<metric>.png)",
+        help="Output filename prefix (default: metric_<type>_<metric>)",
     )
     parser.add_argument(
         "-l",
         "--logscale",
         action="store_true",
-        help="Use logarithmic scale for y-axis",
+        help="Use logarithmic scale for the boxplot y-axis",
     )
     return parser.parse_args()
 
@@ -128,7 +139,8 @@ def load_ground_truth_value(csv_path, target_metric):
     return None
 
 
-def collect_data(data_dir, bench_type, target_metric):
+def collect_data(data_dir, bench_type, target_metric, excluded_loops=None):
+    excluded_loops = set(excluded_loops or [])
     grouped = defaultdict(dict)
 
     for subdir in sorted(data_dir.iterdir()):
@@ -142,6 +154,9 @@ def collect_data(data_dir, bench_type, target_metric):
         mode, num_ranks_str, num_loops_str = match.groups()
         num_ranks = int(num_ranks_str)
         num_loops = int(num_loops_str)
+
+        if num_loops in excluded_loops:
+            continue
 
         metrics_path = subdir / f"perf_metrics_{bench_type}.csv"
         truth_path = subdir / f"perf_ground_truth_{bench_type}.csv"
@@ -162,9 +177,18 @@ def collect_data(data_dir, bench_type, target_metric):
         }
 
     if not grouped:
-        raise ValueError(f"No matching perf_* subdirectories found under {data_dir}")
+        raise ValueError(
+            f"No matching perf_* subdirectories found under {data_dir} "
+            f"after excluding loop counts {sorted(excluded_loops)}"
+        )
 
     return dict(sorted(grouped.items()))
+
+
+def mean(values):
+    if not values:
+        return None
+    return sum(values) / len(values)
 
 
 def plot_grouped_boxplots(grouped_data, metric_name, bench_type, output_path, logscale=False):
@@ -180,7 +204,6 @@ def plot_grouped_boxplots(grouped_data, metric_name, bench_type, output_path, lo
 
     width = 0.32
     group_gap = 1.25
-
     current_center = 1.0
 
     for num_loops in loops_sorted:
@@ -287,7 +310,88 @@ def plot_grouped_boxplots(grouped_data, metric_name, bench_type, output_path, lo
     fig.savefig(output_path)
     plt.close(fig)
 
-    print(f"Plot saved to {output_path}")
+    print(f"Boxplot saved to {output_path}")
+
+
+def plot_percent_difference(grouped_data, metric_name, bench_type, output_path):
+    loops_sorted = sorted(grouped_data.keys())
+
+    mp_positions = []
+    mp_values = []
+    nomp_positions = []
+    nomp_values = []
+    tick_positions = []
+    tick_labels = []
+
+    bar_width = 0.32
+    group_gap = 1.25
+    current_center = 1.0
+
+    for num_loops in loops_sorted:
+        group = grouped_data[num_loops]
+        mp_pos = current_center - 0.22
+        nomp_pos = current_center + 0.22
+
+        tick_positions.append(current_center)
+        tick_labels.append(str(num_loops))
+
+        if "mp" in group:
+            gt = group["mp"]["ground_truth"]
+            avg = mean(group["mp"]["values"])
+            if gt not in (None, 0.0) and avg is not None:
+                mp_positions.append(mp_pos)
+                mp_values.append(100.0 * (avg - gt) / gt)
+
+        if "nomp" in group:
+            gt = group["nomp"]["ground_truth"]
+            avg = mean(group["nomp"]["values"])
+            if gt not in (None, 0.0) and avg is not None:
+                nomp_positions.append(nomp_pos)
+                nomp_values.append(100.0 * (avg - gt) / gt)
+
+        current_center += group_gap
+
+    if not mp_values and not nomp_values:
+        raise ValueError(
+            f"No valid percent-difference data found for metric '{metric_name}'"
+        )
+
+    fig_width = max(10, len(loops_sorted) * 1.8)
+    fig, ax = plt.subplots(figsize=(fig_width, 6.5))
+
+    if mp_values:
+        ax.bar(
+            mp_positions,
+            mp_values,
+            width=bar_width,
+            color="#4C72B0",
+            alpha=0.85,
+            label="mp",
+        )
+    if nomp_values:
+        ax.bar(
+            nomp_positions,
+            nomp_values,
+            width=bar_width,
+            color="#DD8452",
+            alpha=0.85,
+            label="nomp",
+        )
+
+    ax.axhline(0.0, color="black", linewidth=1.0)
+    ax.set_xticks(tick_positions)
+    ax.set_xticklabels(tick_labels)
+    ax.set_xlabel("Number of loops")
+    ax.set_ylabel("Percent Difference from Ground Truth (%)")
+    ax.set_title(f"Percent Difference from Ground Truth for {metric_name} ({bench_type})")
+    ax.grid(axis="y", linestyle="--", alpha=0.4)
+    ax.legend()
+
+    fig.tight_layout()
+    fig.savefig(output_path)
+    plt.close(fig)
+
+    print(f"Percent-difference plot saved to {output_path}")
 
 
 def main():
@@ -299,19 +403,30 @@ def main():
 
     metric_name = normalize_metric_name(args.metric)
 
-    output_path = (
-        Path(args.output)
-        if args.output
-        else Path(f"metric_{args.type}_{metric_name}.png")
+    output_prefix = args.output_prefix or f"metric_{args.type}_{metric_name}"
+    boxplot_path = Path(f"{output_prefix}_boxplot.png")
+    pctdiff_path = Path(f"{output_prefix}_pctdiff.png")
+
+    grouped_data = collect_data(
+        data_dir,
+        args.type,
+        metric_name,
+        excluded_loops=args.exclude,
     )
 
-    grouped_data = collect_data(data_dir, args.type, metric_name)
     plot_grouped_boxplots(
         grouped_data,
         metric_name,
         args.type,
-        output_path,
+        boxplot_path,
         logscale=args.logscale,
+    )
+
+    plot_percent_difference(
+        grouped_data,
+        metric_name,
+        args.type,
+        pctdiff_path,
     )
 
 
