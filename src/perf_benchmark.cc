@@ -25,7 +25,6 @@
 #endif
 
 namespace benchmarks {
-
 namespace {
 
 constexpr int kPerfWarmupIters = 1;
@@ -73,7 +72,6 @@ struct PerfKernelDescriptor {
 };
 
 struct PerfKernelInvocation {
-    char const* name = nullptr;
     PerfKernelFunction function = nullptr;
 };
 
@@ -173,7 +171,6 @@ void writePerfGroundTruth(std::string const& benchmark_name, PerfGroundTruth con
 struct SimdCapabilities {
     bool sse2 = false;
     bool avx = false;
-    bool avx2_fma = false;
     bool avx512f = false;
 };
 
@@ -183,16 +180,12 @@ SimdCapabilities detectSimdCapabilities() {
     SimdCapabilities capabilities;
     capabilities.sse2 = __builtin_cpu_supports("sse2");
     capabilities.avx = __builtin_cpu_supports("avx");
-    capabilities.avx2_fma = __builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma");
     capabilities.avx512f = __builtin_cpu_supports("avx512f");
     return capabilities;
 }
 
 __attribute__((target("sse2"), noinline))
 double runSseScalarKernel(PerfKernelBuffers const& buffers) {
-    // Primarily drives:
-    // - fp_arith_inst_retired_scalar_double
-    // - fp_arith_inst_retired_scalar_single
     double* lhs = buffers.lhs;
     double* rhs = buffers.rhs;
     double* out = buffers.out;
@@ -200,6 +193,7 @@ double runSseScalarKernel(PerfKernelBuffers const& buffers) {
     float* rhs_f = buffers.rhs_f;
     float* out_f = buffers.out_f;
     int const count = buffers.count;
+
     __m128d accum_d = _mm_set_sd(0.25);
     __m128 accum_f = _mm_set_ss(0.5f);
     __m128d damp_d = _mm_set_sd(0.99999988079071044921875);
@@ -224,9 +218,6 @@ double runSseScalarKernel(PerfKernelBuffers const& buffers) {
 
 __attribute__((target("sse2"), noinline))
 double runSsePackedKernel(PerfKernelBuffers const& buffers) {
-    // Primarily drives:
-    // - fp_arith_inst_retired_128b_packed_double
-    // - fp_arith_inst_retired_128b_packed_single
     double* lhs = buffers.lhs;
     double* rhs = buffers.rhs;
     double* out = buffers.out;
@@ -234,6 +225,7 @@ double runSsePackedKernel(PerfKernelBuffers const& buffers) {
     float* rhs_f = buffers.rhs_f;
     float* out_f = buffers.out_f;
     int const count = buffers.count;
+
     __m128d accum0 = _mm_set1_pd(0.25);
     __m128d accum1 = _mm_set1_pd(0.75);
     __m128 accum_f = _mm_set1_ps(0.5f);
@@ -268,19 +260,19 @@ double runSsePackedKernel(PerfKernelBuffers const& buffers) {
     _mm_store_pd(lane0.data(), accum0);
     _mm_store_pd(lane1.data(), accum1);
     _mm_store_ps(lanes_f.data(), accum_f);
+
     return lane0[0] + lane0[1] + lane1[0] + lane1[1]
       + lanes_f[0] + lanes_f[1] + lanes_f[2] + lanes_f[3]
       + out[count - 1] + static_cast<double>(out_f[count - 1]);
 }
 
 __attribute__((target("avx"), noinline))
-double runAvxKernel(PerfKernelBuffers const& buffers) {
-    // Primarily drives:
-    // - fp_arith_inst_retired_256b_packed_double
+double runAvxDoubleKernel(PerfKernelBuffers const& buffers) {
     double* lhs = buffers.lhs;
     double* rhs = buffers.rhs;
     double* out = buffers.out;
     int const count = buffers.count;
+
     __m256d accum0 = _mm256_set1_pd(0.5);
     __m256d accum1 = _mm256_set1_pd(1.5);
     __m256d bias = _mm256_setr_pd(1.0, -1.0, 0.5, -0.5);
@@ -306,18 +298,18 @@ double runAvxKernel(PerfKernelBuffers const& buffers) {
     alignas(32) std::array<double, 4> lanes1{};
     _mm256_store_pd(lanes0.data(), accum0);
     _mm256_store_pd(lanes1.data(), accum1);
+
     return lanes0[0] + lanes0[1] + lanes0[2] + lanes0[3]
       + lanes1[0] + lanes1[1] + lanes1[2] + lanes1[3] + out[count - 2];
 }
 
 __attribute__((target("avx"), noinline))
 double runAvxSingleKernel(PerfKernelBuffers const& buffers) {
-    // Primarily drives:
-    // - fp_arith_inst_retired_256b_packed_single
     float* lhs = buffers.lhs_f;
     float* rhs = buffers.rhs_f;
     float* out = buffers.out_f;
     int const count = buffers.count;
+
     __m256 accum0 = _mm256_set1_ps(0.5f);
     __m256 accum1 = _mm256_set1_ps(1.5f);
     __m256 bias = _mm256_setr_ps(1.0f, -1.0f, 0.5f, -0.5f, 2.0f, -2.0f, 3.0f, -3.0f);
@@ -343,6 +335,7 @@ double runAvxSingleKernel(PerfKernelBuffers const& buffers) {
     alignas(32) std::array<float, 8> lanes1{};
     _mm256_store_ps(lanes0.data(), accum0);
     _mm256_store_ps(lanes1.data(), accum1);
+
     double sum = static_cast<double>(out[count - 2]);
     for (float value : lanes0) {
         sum += value;
@@ -353,115 +346,15 @@ double runAvxSingleKernel(PerfKernelBuffers const& buffers) {
     return sum;
 }
 
-__attribute__((target("avx"), noinline))
-double runAvxComplexKernel(PerfKernelBuffers const& buffers) {
-    // Primarily drives:
-    // - fp_arith_inst_retired_256b_packed_double
-    // This path is only used for complex<double> runs.
-    double* lhs = buffers.lhs;
-    double* rhs = buffers.rhs;
-    double* out = buffers.out;
-    int const count = buffers.count;
-    __m256d accum = _mm256_setr_pd(0.125, -0.125, 0.25, -0.25);
-
-    for (int i = 0; i < count; i += 4) {
-        __m256d lhs_vec = _mm256_loadu_pd(lhs + i);
-        __m256d rhs_vec = _mm256_loadu_pd(rhs + i);
-        __m256d lhs_real = _mm256_movedup_pd(lhs_vec);
-        __m256d lhs_imag = _mm256_permute_pd(lhs_vec, 0xF);
-        __m256d rhs_swapped = _mm256_permute_pd(rhs_vec, 0x5);
-
-        __m256d prod0 = _mm256_mul_pd(lhs_real, rhs_vec);
-        __m256d prod1 = _mm256_mul_pd(lhs_imag, rhs_swapped);
-        __m256d complex_value = _mm256_addsub_pd(prod0, prod1);
-
-        accum = _mm256_add_pd(accum, complex_value);
-        _mm256_storeu_pd(out + i, _mm256_add_pd(complex_value, accum));
-    }
-
-    alignas(32) std::array<double, 4> lanes{};
-    _mm256_store_pd(lanes.data(), accum);
-    return lanes[0] + lanes[1] + lanes[2] + lanes[3] + out[count - 1];
-}
-
-__attribute__((target("avx2,fma"), noinline))
-double runAvx2FmaKernel(PerfKernelBuffers const& buffers) {
-    // Primarily drives:
-    // - fp_arith_inst_retired_256b_packed_double
-    // Uses FMA instructions; counts are still reflected in retired FP arithmetic events.
-    double* lhs = buffers.lhs;
-    double* rhs = buffers.rhs;
-    double* out = buffers.out;
-    int const count = buffers.count;
-    __m256d accum = _mm256_set1_pd(0.125);
-    __m256d shift = _mm256_setr_pd(0.25, 0.5, 0.75, 1.0);
-
-    for (int i = 0; i < count; i += 8) {
-        __m256d lhs0 = _mm256_loadu_pd(lhs + i);
-        __m256d rhs0 = _mm256_loadu_pd(rhs + i);
-        __m256d lhs1 = _mm256_loadu_pd(lhs + i + 4);
-        __m256d rhs1 = _mm256_loadu_pd(rhs + i + 4);
-
-        __m256d fused0 = _mm256_fmadd_pd(lhs0, rhs0, shift);
-        __m256d fused1 = _mm256_fnmadd_pd(lhs1, rhs1, shift);
-
-        accum = _mm256_add_pd(accum, _mm256_add_pd(fused0, fused1));
-
-        _mm256_storeu_pd(out + i, _mm256_add_pd(fused0, accum));
-        _mm256_storeu_pd(out + i + 4, _mm256_sub_pd(fused1, accum));
-    }
-
-    alignas(32) std::array<double, 4> lanes{};
-    _mm256_store_pd(lanes.data(), accum);
-    return lanes[0] + lanes[1] + lanes[2] + lanes[3] + out[count - 3];
-}
-
-__attribute__((target("avx2,fma"), noinline))
-double runAvx2FmaSingleKernel(PerfKernelBuffers const& buffers) {
-    // Primarily drives:
-    // - fp_arith_inst_retired_256b_packed_single
-    // Uses FMA instructions; counts are still reflected in retired FP arithmetic events.
-    float* lhs = buffers.lhs_f;
-    float* rhs = buffers.rhs_f;
-    float* out = buffers.out_f;
-    int const count = buffers.count;
-    __m256 accum = _mm256_set1_ps(0.125f);
-    __m256 shift = _mm256_setr_ps(0.25f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f);
-
-    for (int i = 0; i < count; i += 16) {
-        __m256 lhs0 = _mm256_loadu_ps(lhs + i);
-        __m256 rhs0 = _mm256_loadu_ps(rhs + i);
-        __m256 lhs1 = _mm256_loadu_ps(lhs + i + 8);
-        __m256 rhs1 = _mm256_loadu_ps(rhs + i + 8);
-
-        __m256 fused0 = _mm256_fmadd_ps(lhs0, rhs0, shift);
-        __m256 fused1 = _mm256_fnmadd_ps(lhs1, rhs1, shift);
-
-        accum = _mm256_add_ps(accum, _mm256_add_ps(fused0, fused1));
-
-        _mm256_storeu_ps(out + i, _mm256_add_ps(fused0, accum));
-        _mm256_storeu_ps(out + i + 8, _mm256_sub_ps(fused1, accum));
-    }
-
-    alignas(32) std::array<float, 8> lanes{};
-    _mm256_store_ps(lanes.data(), accum);
-    double sum = static_cast<double>(out[count - 3]);
-    for (float value : lanes) {
-        sum += value;
-    }
-    return sum;
-}
-
 __attribute__((target("avx512f"), noinline))
-double runAvx512Kernel(PerfKernelBuffers const& buffers) {
-    // Primarily drives:
-    // - fp_arith_inst_retired_512b_packed_double
+double runAvx512DoubleKernel(PerfKernelBuffers const& buffers) {
     double* lhs = buffers.lhs;
     double* rhs = buffers.rhs;
     double* out = buffers.out;
     int const count = buffers.count;
+
     __m512d accum = _mm512_set1_pd(0.0625);
-    __m512d blend = _mm512_setr_pd(1.0, -1.0, 2.0, -2.0, 3.0, -3.0, 4.0, -4.0);
+    __m512d bias = _mm512_setr_pd(1.0, -1.0, 2.0, -2.0, 3.0, -3.0, 4.0, -4.0);
 
     for (int i = 0; i < count; i += 16) {
         __m512d lhs0 = _mm512_loadu_pd(lhs + i);
@@ -469,8 +362,8 @@ double runAvx512Kernel(PerfKernelBuffers const& buffers) {
         __m512d lhs1 = _mm512_loadu_pd(lhs + i + 8);
         __m512d rhs1 = _mm512_loadu_pd(rhs + i + 8);
 
-        __m512d mix0 = _mm512_add_pd(_mm512_mul_pd(lhs0, rhs0), blend);
-        __m512d mix1 = _mm512_sub_pd(_mm512_mul_pd(lhs1, rhs1), blend);
+        __m512d mix0 = _mm512_add_pd(_mm512_mul_pd(lhs0, rhs0), bias);
+        __m512d mix1 = _mm512_sub_pd(_mm512_mul_pd(lhs1, rhs1), bias);
 
         accum = _mm512_add_pd(accum, _mm512_add_pd(mix0, mix1));
 
@@ -480,20 +373,20 @@ double runAvx512Kernel(PerfKernelBuffers const& buffers) {
 
     alignas(64) std::array<double, 8> lanes{};
     _mm512_store_pd(lanes.data(), accum);
+
     return lanes[0] + lanes[1] + lanes[2] + lanes[3]
       + lanes[4] + lanes[5] + lanes[6] + lanes[7] + out[count - 4];
 }
 
 __attribute__((target("avx512f"), noinline))
 double runAvx512SingleKernel(PerfKernelBuffers const& buffers) {
-    // Primarily drives:
-    // - fp_arith_inst_retired_512b_packed_single
     float* lhs = buffers.lhs_f;
     float* rhs = buffers.rhs_f;
     float* out = buffers.out_f;
     int const count = buffers.count;
+
     __m512 accum = _mm512_set1_ps(0.0625f);
-    __m512 blend = _mm512_setr_ps(
+    __m512 bias = _mm512_setr_ps(
       1.0f, -1.0f, 2.0f, -2.0f, 3.0f, -3.0f, 4.0f, -4.0f,
       5.0f, -5.0f, 6.0f, -6.0f, 7.0f, -7.0f, 8.0f, -8.0f
     );
@@ -504,8 +397,8 @@ double runAvx512SingleKernel(PerfKernelBuffers const& buffers) {
         __m512 lhs1 = _mm512_loadu_ps(lhs + i + 16);
         __m512 rhs1 = _mm512_loadu_ps(rhs + i + 16);
 
-        __m512 mix0 = _mm512_add_ps(_mm512_mul_ps(lhs0, rhs0), blend);
-        __m512 mix1 = _mm512_sub_ps(_mm512_mul_ps(lhs1, rhs1), blend);
+        __m512 mix0 = _mm512_add_ps(_mm512_mul_ps(lhs0, rhs0), bias);
+        __m512 mix1 = _mm512_sub_ps(_mm512_mul_ps(lhs1, rhs1), bias);
 
         accum = _mm512_add_ps(accum, _mm512_add_ps(mix0, mix1));
 
@@ -515,6 +408,7 @@ double runAvx512SingleKernel(PerfKernelBuffers const& buffers) {
 
     alignas(64) std::array<float, 16> lanes{};
     _mm512_store_ps(lanes.data(), accum);
+
     double sum = static_cast<double>(out[count - 4]);
     for (float value : lanes) {
         sum += value;
@@ -525,13 +419,11 @@ double runAvx512SingleKernel(PerfKernelBuffers const& buffers) {
 #endif
 
 double runScalarPerfKernel(PerfKernelBuffers const& buffers) {
-    // Primarily drives:
-    // - fp_arith_inst_retired_scalar_double
-    // Also contributes to generic events such as instructions/cycles.
     double* lhs = buffers.lhs;
     double* rhs = buffers.rhs;
     double* out = buffers.out;
     int const count = buffers.count;
+
     double accum0 = 0.25;
     double accum1 = 0.75;
     double accum2 = -0.5;
@@ -550,14 +442,12 @@ double runScalarPerfKernel(PerfKernelBuffers const& buffers) {
 
 PerfMetricEstimate estimateScalarKernel(int count) {
     PerfMetricEstimate estimate;
-    // Heuristic scalar loop: 7 muls + 7 adds/subs per element.
     estimate.scalar_double = 14ULL * static_cast<std::uint64_t>(count);
     return estimate;
 }
 
 PerfMetricEstimate estimateSseScalarKernel(int count) {
     PerfMetricEstimate estimate;
-    // 2 muls + 1 add for each scalar double and scalar single lane.
     estimate.scalar_double = 3ULL * static_cast<std::uint64_t>(count);
     estimate.scalar_single = 3ULL * static_cast<std::uint64_t>(count);
     return estimate;
@@ -571,7 +461,7 @@ PerfMetricEstimate estimateSsePackedKernel(int count) {
     return estimate;
 }
 
-PerfMetricEstimate estimateAvxKernel(int count) {
+PerfMetricEstimate estimateAvxDoubleKernel(int count) {
     PerfMetricEstimate estimate;
     std::uint64_t const groups = static_cast<std::uint64_t>(count / 8);
     estimate.packed_256_double = 12ULL * groups;
@@ -585,28 +475,7 @@ PerfMetricEstimate estimateAvxSingleKernel(int count) {
     return estimate;
 }
 
-PerfMetricEstimate estimateAvxComplexKernel(int count) {
-    PerfMetricEstimate estimate;
-    std::uint64_t const groups = static_cast<std::uint64_t>(count / 4);
-    estimate.packed_256_double = 5ULL * groups;
-    return estimate;
-}
-
-PerfMetricEstimate estimateAvx2FmaKernel(int count) {
-    PerfMetricEstimate estimate;
-    std::uint64_t const groups = static_cast<std::uint64_t>(count / 8);
-    estimate.packed_256_double = 6ULL * groups;
-    return estimate;
-}
-
-PerfMetricEstimate estimateAvx2FmaSingleKernel(int count) {
-    PerfMetricEstimate estimate;
-    std::uint64_t const groups = static_cast<std::uint64_t>(count / 16);
-    estimate.packed_256_single = 6ULL * groups;
-    return estimate;
-}
-
-PerfMetricEstimate estimateAvx512Kernel(int count) {
+PerfMetricEstimate estimateAvx512DoubleKernel(int count) {
     PerfMetricEstimate estimate;
     std::uint64_t const groups = static_cast<std::uint64_t>(count / 16);
     estimate.packed_512_double = 8ULL * groups;
@@ -634,20 +503,12 @@ std::vector<PerfKernelDescriptor> buildPerfKernelDescriptors(int count) {
     }
 
     if (capabilities.avx) {
-        descriptors.push_back({"avx_double", runAvxKernel, estimateAvxKernel(count)});
+        descriptors.push_back({"avx_double", runAvxDoubleKernel, estimateAvxDoubleKernel(count)});
         descriptors.push_back({"avx_single", runAvxSingleKernel, estimateAvxSingleKernel(count)});
-        if constexpr (std::is_same_v<T, Kokkos::complex<double>>) {
-            descriptors.push_back({"avx_complex", runAvxComplexKernel, estimateAvxComplexKernel(count)});
-        }
-    }
-
-    if (capabilities.avx2_fma) {
-        descriptors.push_back({"avx2_fma_double", runAvx2FmaKernel, estimateAvx2FmaKernel(count)});
-        descriptors.push_back({"avx2_fma_single", runAvx2FmaSingleKernel, estimateAvx2FmaSingleKernel(count)});
     }
 
     if (capabilities.avx512f) {
-        descriptors.push_back({"avx512_double", runAvx512Kernel, estimateAvx512Kernel(count)});
+        descriptors.push_back({"avx512_double", runAvx512DoubleKernel, estimateAvx512DoubleKernel(count)});
         descriptors.push_back({"avx512_single", runAvx512SingleKernel, estimateAvx512SingleKernel(count)});
     }
 #endif
@@ -660,7 +521,6 @@ std::uint64_t shuffleSeedForBenchmark() {
     if constexpr (std::is_same_v<T, Kokkos::complex<double>>) {
         return kPerfShuffleSeed ^ 0x9e3779b97f4a7c15ULL;
     }
-
     return kPerfShuffleSeed;
 }
 
@@ -674,7 +534,7 @@ PerfSchedule buildPerfSchedule(int count) {
 
     for (PerfKernelDescriptor const& descriptor : descriptors) {
         for (int repeat = 0; repeat < kPerfKernelRepeatCount; ++repeat) {
-            schedule.kernels.push_back({descriptor.name, descriptor.function});
+            schedule.kernels.push_back({descriptor.function});
             addEstimate(schedule.ground_truth_per_iter, descriptor.estimate);
         }
     }
@@ -684,14 +544,10 @@ PerfSchedule buildPerfSchedule(int count) {
 }
 
 double runPerfInstructionMix(PerfKernelBuffers const& buffers, PerfSchedule const& schedule) {
-    // This intentionally mixes scalar/SSE/AVX/AVX2/FMA/AVX-512 kernels so that
-    // a wide VT_EVENTS list can be exercised in one short benchmark window.
-    // ISA-specific counters remain near zero when that ISA is unavailable.
     double checksum = 0.0;
     for (PerfKernelInvocation const& kernel : schedule.kernels) {
         checksum += kernel.function(buffers);
     }
-
     return checksum;
 }
 
@@ -709,6 +565,7 @@ benchmark_results_t runTimedPerfBenchmark(char const* benchmark_name, int iters)
         rhs[i] = 0.5 + static_cast<double>((i % 11) + 1) * 0.0625;
         lhs_f[i] = 1.0f + static_cast<float>((i % 13) + 1) * 0.125f;
         rhs_f[i] = 0.5f + static_cast<float>((i % 7) + 1) * 0.0625f;
+
         if constexpr (std::is_same_v<T, Kokkos::complex<double>>) {
             if ((i % 2) == 1) {
                 lhs[i] *= -1.0;
@@ -721,11 +578,14 @@ benchmark_results_t runTimedPerfBenchmark(char const* benchmark_name, int iters)
 
     std::vector<double> iter_timings;
     iter_timings.reserve(iters > kPerfWarmupIters ? iters - kPerfWarmupIters : 0);
+
     double total_time = 0.0;
     double checksum = 0.0;
+
     PerfKernelBuffers buffers{
       lhs.data(), rhs.data(), out.data(), lhs_f.data(), rhs_f.data(), out_f.data(), kPerfVectorLength
     };
+
     PerfSchedule const schedule = buildPerfSchedule<T>(kPerfVectorLength);
     PerfGroundTruth const ground_truth = scaleGroundTruth(schedule.ground_truth_per_iter, iters);
 
