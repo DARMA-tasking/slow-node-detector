@@ -5,6 +5,14 @@
 #include <cstdio>
 #include <cassert>
 #include <functional>
+#include <map>
+#include <vector>
+#include <string>
+#include <algorithm>
+#include <cctype>
+#include <optional>
+#include <cstdlib>
+#include <unistd.h>
 
 #include "sensors.h"
 #include "freq.h"
@@ -101,15 +109,285 @@ std::map<int, std::map<int,double>> parseSensorsOutput(FILE* pipe) {
   return socketCoreTemps;
 }
 
-std::map<int, std::map<int, double>> runSensors() {
+namespace {
+
+std::string trim(const std::string& input) {
+  auto begin = std::find_if_not(
+    input.begin(),
+    input.end(),
+    [](unsigned char c) { return std::isspace(c); }
+  );
+
+  auto end = std::find_if_not(
+    input.rbegin(),
+    input.rend(),
+    [](unsigned char c) { return std::isspace(c); }
+  ).base();
+
+  if (begin >= end) {
+    return "";
+  }
+
+  return std::string(begin, end);
+}
+
+std::optional<std::string> readTextFile(const std::filesystem::path& path) {
+  std::ifstream file(path);
+  if (!file) {
+    return std::nullopt;
+  }
+
+  std::ostringstream buffer;
+  buffer << file.rdbuf();
+  return trim(buffer.str());
+}
+
+bool executableExistsInPath(const std::string& executable) {
+  if (executable.find('/') != std::string::npos) {
+    return access(executable.c_str(), X_OK) == 0;
+  }
+
+  const char* pathEnv = std::getenv("PATH");
+  if (pathEnv == nullptr) {
+    return false;
+  }
+
+  std::stringstream pathStream(pathEnv);
+  std::string directory;
+
+  while (std::getline(pathStream, directory, ':')) {
+    if (directory.empty()) {
+      directory = ".";
+    }
+
+    std::filesystem::path candidate = std::filesystem::path(directory) / executable;
+
+    std::error_code ec;
+    if (
+      std::filesystem::exists(candidate, ec) &&
+      !std::filesystem::is_directory(candidate, ec) &&
+      access(candidate.c_str(), X_OK) == 0
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool parsePackageLabel(const std::string& label, int& socketId) {
+  std::istringstream iss(label);
+  std::string packageWord;
+  std::string idWord;
+
+  if (!(iss >> packageWord >> idWord >> socketId)) {
+    return false;
+  }
+
+  return packageWord == "Package" && idWord == "id";
+}
+
+bool parseCoreLabel(const std::string& label, int& coreNumber) {
+  std::istringstream iss(label);
+  std::string coreWord;
+
+  if (!(iss >> coreWord >> coreNumber)) {
+    return false;
+  }
+
+  return coreWord == "Core";
+}
+
+bool parseTempLabelIndex(const std::filesystem::path& path, int& index) {
+  const std::string filename = path.filename().string();
+
+  const std::string prefix = "temp";
+  const std::string suffix = "_label";
+
+  if (filename.size() <= prefix.size() + suffix.size()) {
+    return false;
+  }
+
+  if (filename.rfind(prefix, 0) != 0) {
+    return false;
+  }
+
+  if (filename.compare(filename.size() - suffix.size(), suffix.size(), suffix) != 0) {
+    return false;
+  }
+
+  const std::string indexString = filename.substr(
+    prefix.size(),
+    filename.size() - prefix.size() - suffix.size()
+  );
+
+  if (indexString.empty()) {
+    return false;
+  }
+
+  if (!std::all_of(indexString.begin(), indexString.end(), [](unsigned char c) {
+        return std::isdigit(c);
+      })) {
+    return false;
+  }
+
+  index = std::stoi(indexString);
+  return true;
+}
+
+struct HwmonTempEntry {
+  int index;
+  std::filesystem::path labelPath;
+  std::filesystem::path inputPath;
+};
+
+std::vector<HwmonTempEntry> getSortedTempLabelEntries(const std::filesystem::path& hwmonDir) {
+  std::vector<HwmonTempEntry> entries;
+
+  std::error_code ec;
+  std::filesystem::directory_iterator iterator(hwmonDir, ec);
+  if (ec) {
+    return entries;
+  }
+
+  for (const auto& entry : iterator) {
+    int index = -1;
+    if (!parseTempLabelIndex(entry.path(), index)) {
+      continue;
+    }
+
+    std::filesystem::path inputPath =
+      hwmonDir / ("temp" + std::to_string(index) + "_input");
+
+    if (!std::filesystem::exists(inputPath, ec)) {
+      continue;
+    }
+
+    entries.push_back(HwmonTempEntry{
+      index,
+      entry.path(),
+      inputPath
+    });
+  }
+
+  std::sort(
+    entries.begin(),
+    entries.end(),
+    [](const HwmonTempEntry& a, const HwmonTempEntry& b) {
+      return a.index < b.index;
+    }
+  );
+
+  return entries;
+}
+
+std::map<int, std::map<int, double>> readCoretempHwmon() {
+  std::map<int, std::map<int, double>> socketCoreTemps;
+
+  const std::filesystem::path hwmonRoot = "/sys/class/hwmon";
+
+  std::error_code ec;
+  if (!std::filesystem::exists(hwmonRoot, ec)) {
+    return socketCoreTemps;
+  }
+
+  std::filesystem::directory_iterator iterator(hwmonRoot, ec);
+  if (ec) {
+    return socketCoreTemps;
+  }
+
+  std::vector<std::filesystem::path> coretempHwmonDirs;
+
+  for (const auto& entry : iterator) {
+    if (!entry.is_directory(ec)) {
+      continue;
+    }
+
+    const std::filesystem::path hwmonDir = entry.path();
+    const std::filesystem::path namePath = hwmonDir / "name";
+
+    auto name = readTextFile(namePath);
+    if (!name.has_value()) {
+      continue;
+    }
+
+    if (*name == "coretemp") {
+      coretempHwmonDirs.push_back(hwmonDir);
+    }
+  }
+
+  std::sort(coretempHwmonDirs.begin(), coretempHwmonDirs.end());
+
+  for (const auto& hwmonDir : coretempHwmonDirs) {
+    int currentSocket = -1;
+
+    const auto tempEntries = getSortedTempLabelEntries(hwmonDir);
+
+    for (const auto& tempEntry : tempEntries) {
+      auto label = readTextFile(tempEntry.labelPath);
+      if (!label.has_value()) {
+        continue;
+      }
+
+      int socketId = -1;
+      if (parsePackageLabel(*label, socketId)) {
+        currentSocket = socketId;
+        if (socketCoreTemps.find(currentSocket) == socketCoreTemps.end()) {
+          socketCoreTemps[currentSocket] = std::map<int, double>();
+        }
+        continue;
+      }
+
+      int coreNumber = -1;
+      if (!parseCoreLabel(*label, coreNumber)) {
+        continue;
+      }
+
+      if (currentSocket == -1) {
+        continue;
+      }
+
+      auto input = readTextFile(tempEntry.inputPath);
+      if (!input.has_value()) {
+        continue;
+      }
+
+      double temperature = std::stod(*input) / 1000.0;
+
+      auto& coreMap = socketCoreTemps[currentSocket];
+      assert(coreMap.find(coreNumber) == coreMap.end()); // sanity check
+      coreMap[coreNumber] = temperature;
+    }
+  }
+
+  return socketCoreTemps;
+}
+
+std::map<int, std::map<int, double>> runSensorsCommand() {
   FILE* pipe = popen("sensors", "r");
   if (!pipe) {
     std::cerr << "Error: Unable to run sensors command\n";
     return {};
   }
+
   auto socketCoreTemps = parseSensorsOutput(pipe);
   pclose(pipe);
+
   return socketCoreTemps;
+}
+
+} // anonymous namespace
+
+std::map<int, std::map<int, double>> runSensors() {
+  if (executableExistsInPath("sensors")) {
+    auto socketCoreTemps = runSensorsCommand();
+
+    if (!socketCoreTemps.empty()) {
+      return socketCoreTemps;
+    }
+  }
+
+  return readCoretempHwmon();
 }
 
 void getTempsAndOrders(
@@ -171,7 +449,8 @@ void writeSensorAndFreqData(
 }
 
 void runSensorsAndReduceOutput(const std::string& proc_name, std::string identifier) {
-  // Get output from `sensors` if available
+  // Get output from `sensors` if available. If `sensors` is not available,
+  // fall back to reading core temperatures directly from /sys/class/hwmon.
   auto socketCoreTemps = runSensors();
   if (socketCoreTemps.empty()) {
     return;

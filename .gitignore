@@ -10,3 +10,5 @@ cmds
 data
 *.log
 *.out
+plots
+scripts
