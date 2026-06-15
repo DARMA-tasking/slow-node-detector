@@ -1,137 +1,123 @@
-
+#include "benchmarks.h"
 #include "sensors.h"
 
-#include <mkl.h>
-#include <Kokkos_Random.hpp>
+#include <mpi.h>
+#include <Kokkos_Core.hpp>
 
+#ifdef VT_ENABLED
+#include <vt/transport.h>
+#endif
+
+#include <cstdlib>
 #include <iostream>
+#include <string>
+#include <vector>
 
-static int iters = 100;
-static int M = 128;
-static int N = 128;
-static int K = 128;
+namespace {
 
-std::tuple<std::vector<double>, double> runBenchmark() {
-  Kokkos::View<double**> A("A", M, N);
-  Kokkos::View<double**> B("B", N, K);
-  Kokkos::View<double**> C("C", M, K);
+int iters = 100;
+int N1 = 128;
+int M2 = 128;
+int N2 = 128;
+int M3 = 128;
+int N3 = 128;
+int K3 = 128;
+int N4 = 128;
 
-  double* A_ptr = A.data();
-  double* B_ptr = B.data();
-  double* C_ptr = C.data();
+void printUsage(char const* exe) {
+  std::cerr << "USAGE: " << exe
+            << " [--benchmark all|level1|level2|level3|dpotrf|perf]"
+            << " [iters [N1 M2 N2 M3 N3 K3 N4]]" << std::endl;
+}
 
-  Kokkos::Random_XorShift64_Pool pool(123);
-  Kokkos::fill_random(A, pool, 10.0);
-  Kokkos::fill_random(B, pool, 10.0);
+bool parseBenchmark(std::string const& name, benchmarks::benchmark_types& benchmark) {
+  if (name == "all") {
+    benchmark = benchmarks::num_benchmarks;
+  } else if (name == "level1") {
+    benchmark = benchmarks::level1;
+  } else if (name == "level2") {
+    benchmark = benchmarks::level2;
+  } else if (name == "level3") {
+    benchmark = benchmarks::level3;
+  } else if (name == "dpotrf") {
+    benchmark = benchmarks::dpotrf;
+  } else if (name == "perf") {
+    benchmark = benchmarks::perf;
+  } else {
+    return false;
+  }
+  return true;
+}
 
-  std::vector<double> iter_timings;
+} // namespace
 
-  double total_time = 0.0;
+/*
+ * USAGE: ./slow_node [--benchmark all|level1|level2|level3|dpotrf|perf]
+ *                    [iters [N1 M2 N2 M3 N3 K3 N4]]
+ */
+int main(int argc, char** argv) {
+  std::vector<int> sizes = {N1, M2, N2, M3, N3, K3, N4};
+  benchmarks::benchmark_types benchmark = benchmarks::num_benchmarks;
 
-  MPI_Barrier(MPI_COMM_WORLD);
+  int arg = 1;
+  if (argc > arg && std::string(argv[arg]) == "--benchmark") {
+    if (argc <= arg + 1 || !parseBenchmark(argv[arg + 1], benchmark)) {
+      printUsage(argv[0]);
+      return 1;
+    }
+    arg += 2;
+  }
 
-  for (int i = 0; i < iters; i++) {
-    Kokkos::Timer timer;
-    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
-      M,         // number of rows in C (and A)
-      K,         // number of columns in C (and B)
-      N,         // shared inner dimension (columns of A, rows of B)
-      1.0,       // alpha
-      A_ptr,     // matrix A pointer
-      N,         // leading dimension of A (because A is M×N)
-      B_ptr,     // matrix B pointer
-      K,         // leading dimension of B (because B is N×K)
-      0.0,       // beta
-      C_ptr,     // matrix C pointer
-      K);        // leading dimension of C (because C is M×K)
-    Kokkos::fence();
-    // Do not count the first iteration
-    if (i > 0) {
-      double time = timer.seconds();
-      total_time += time;
-      iter_timings.push_back(time);
+  int const remaining = argc - arg;
+  if (remaining != 0) {
+    if (remaining != 1 && remaining != 8) {
+      printUsage(argv[0]);
+      return 1;
+    }
+
+    iters = std::atoi(argv[arg++]);
+    if (remaining == 8) {
+      sizes[0] = std::atoi(argv[arg++]);
+      sizes[1] = std::atoi(argv[arg++]);
+      sizes[2] = std::atoi(argv[arg++]);
+      sizes[3] = std::atoi(argv[arg++]);
+      sizes[4] = std::atoi(argv[arg++]);
+      sizes[5] = std::atoi(argv[arg++]);
+      sizes[6] = std::atoi(argv[arg++]);
     }
   }
 
-  int rank = -1;
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-
-  std::cout << "rank: " << rank << ", total_time=" << total_time << std::endl;
-
-  return std::make_tuple(iter_timings, total_time);
-}
-
-int main(int argc, char** argv) {
-  if (argc > 1) {
-    iters = atoi(argv[1]) + 1; // add one iteration since we will drop the first one
-    M = N = K = atoi(argv[2]);
-  }
-  std::cout << "iters: " << iters << ", M=N=K=" << M << std::endl;
+  std::cout << "iters: " << iters
+            << ", sizes=" << sizes[0] << "," << sizes[1] << "," << sizes[2]
+            << "," << sizes[3] << "," << sizes[4] << "," << sizes[5]
+            << "," << sizes[6] << std::endl;
 
   MPI_Init(&argc, &argv);
+  MPI_Comm comm = MPI_COMM_WORLD;
+#ifdef VT_ENABLED
+  vt::initialize(argc, argv, &comm);
+#endif
   Kokkos::initialize(argc, argv);
 
   int rank = -1;
-  int num_ranks = 0;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-  MPI_Comm_size(MPI_COMM_WORLD, &num_ranks);
 
   char processor_name[MPI_MAX_PROCESSOR_NAME];
   int name_len;
   MPI_Get_processor_name(processor_name, &name_len);
 
   sensors::runSensorsAndReduceOutput(processor_name, "pre");
-  auto const& [iter_timings, total_time] = runBenchmark();
+  auto output = benchmark == benchmarks::num_benchmarks ?
+    benchmarks::runAllBenchmarks(sizes, iters + 1) :
+    benchmarks::runSelectedBenchmark(benchmark, sizes, iters + 1);
   sensors::runSensorsAndReduceOutput(processor_name, "post");
 
-  std::vector<double> all_times;
-  all_times.resize(num_ranks);
-
-  std::vector<double> all_iter_times;
-  all_iter_times.resize(num_ranks * iters);
-
-  std::vector<char> all_processor_names;
-  all_processor_names.resize(num_ranks * MPI_MAX_PROCESSOR_NAME);
-
-  if (rank == 0) {
-    std::cout << "num_ranks: " << num_ranks << std::endl;
-  }
-
-  MPI_Gather(
-    &total_time, 1, MPI_DOUBLE,
-    &all_times[0], 1, MPI_DOUBLE, 0,
-    MPI_COMM_WORLD
-  );
-
-  MPI_Gather(
-    &iter_timings[0], iters, MPI_DOUBLE,
-    &all_iter_times[0], iters, MPI_DOUBLE, 0,
-    MPI_COMM_WORLD
-  );
-
-  MPI_Gather(
-    &processor_name, MPI_MAX_PROCESSOR_NAME, MPI_CHAR,
-    &all_processor_names[0], MPI_MAX_PROCESSOR_NAME, MPI_CHAR, 0,
-    MPI_COMM_WORLD
-  );
-
-  if (rank == 0) {
-    int cur_rank = 0;
-    int cur = 0;
-    for (auto&& time : all_times) {
-      std::cout << "gather: " << cur_rank << " ("
-        << std::string(&all_processor_names[cur_rank * MPI_MAX_PROCESSOR_NAME])
-        << "): " << time << ": breakdown: ";
-      for (int i = cur; i < iters + cur; i++) {
-        std::cout << all_iter_times[i] << " ";
-      }
-      std::cout << std::endl;
-      cur += iters;
-      cur_rank++;
-    }
-  }
+  benchmarks::printBenchmarkOutput(output, iters);
 
   Kokkos::finalize();
+#ifdef VT_ENABLED
+  vt::finalize();
+#endif
   MPI_Finalize();
   return 0;
 }
